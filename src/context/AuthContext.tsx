@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { onAuthStateChanged, signOut, type User as FbUser } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, firebaseConfigured } from '@/lib/firebase';
 import type { User } from '@/types/models';
 
 interface AuthState {
@@ -32,14 +32,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileReady, setProfileReady] = useState(false);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => {
-      setFbUser(u);
+    // Without a real Firebase config, don't touch auth — it would throw
+    // auth/invalid-api-key and take the whole app down. Fail open to signed-out.
+    if (!firebaseConfigured) {
       setAuthReady(true);
-      if (!u) {
-        setProfile(null);
-        setProfileReady(true);
-      }
-    });
+      setProfileReady(true);
+      return;
+    }
+    try {
+      return onAuthStateChanged(auth, (u) => {
+        setFbUser(u);
+        setAuthReady(true);
+        if (!u) {
+          setProfile(null);
+          setProfileReady(true);
+        }
+      });
+    } catch {
+      setAuthReady(true);
+      setProfileReady(true);
+      return;
+    }
   }, []);
 
   useEffect(() => {

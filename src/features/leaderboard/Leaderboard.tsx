@@ -14,7 +14,7 @@ import { Num, Spinner } from '@/components/ui';
 import type { LbRow } from '@/lib/leaderboard';
 import { useLeaderboard, type BuiltInput } from './useLeaderboard';
 
-function LbTable({
+export function LbTable({
   rows,
   inputs,
   roundCount,
@@ -53,26 +53,24 @@ function LbTable({
                 <td className="py-1.5 pr-2">
                   <Num>{row.position}</Num>
                 </td>
-                <td className="py-1.5 pr-2">
-                  <span className="block">{row.name}</span>
-                  {inp && inp.diffs.some((d) => d) && (
-                    <span className="block text-xs text-ink-faint">
-                      diff{' '}
-                      {inp.diffs
-                        .map((d, i) => (d ? `R${i + 1} ${d}` : null))
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 pr-2 text-right">
+                <td className="py-1.5 pr-2">{row.name}</td>
+                <td className="py-1.5 pr-2 text-right align-top">
                   <Num>{row.index.toFixed(1)}</Num>
                 </td>
-                {rn.map((r) => (
-                  <td key={r} className="py-1.5 pr-2 text-right">
-                    <Num>{row.roundsToPar[r - 1] ?? '–'}</Num>
-                  </td>
-                ))}
+                {rn.map((r) => {
+                  const diff = inp?.diffs[r - 1];
+                  return (
+                    <td key={r} className="py-1.5 pr-2 text-right align-top">
+                      <Num className="block leading-tight">{row.roundsToPar[r - 1] ?? '–'}</Num>
+                      {/* differential to index — the sandbagging signal (§4) */}
+                      {diff && (
+                        <Num className="block text-[0.65rem] leading-tight text-ink-faint">
+                          {diff}
+                        </Num>
+                      )}
+                    </td>
+                  );
+                })}
                 <td className="py-1.5 pr-2 text-right text-ink-faint">
                   <Num>{inp?.thru ?? '–'}</Num>
                 </td>
@@ -98,6 +96,10 @@ export function Leaderboard({ tournamentId }: { tournamentId: string }) {
         <h2 className="mb-2 border-b border-ink pb-1 text-lg">Gross</h2>
         <LbTable rows={gross} inputs={inputs} roundCount={roundCount} />
       </div>
+      <p className="text-xs text-ink-faint">
+        The small figure under each round is your differential — strokes above or
+        below your index that round.
+      </p>
       {showNet && (
         <div>
           <h2 className="mb-2 border-b border-ink pb-1 text-lg">Net</h2>

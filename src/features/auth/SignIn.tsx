@@ -9,8 +9,9 @@ import {
   signInWithPopup,
   type ConfirmationResult,
 } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, firebaseConfigured } from '@/lib/firebase';
 import { Button, Field, Rule } from '@/components/ui';
+import { Mark } from '@/components/Mark';
 
 function normalizeUsPhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -75,11 +76,19 @@ export function SignIn() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6">
       <div className="mb-8 text-center">
+        <Mark className="mx-auto mb-3 h-12 w-12 text-ink" />
         <h1 className="text-4xl">The Draw</h1>
         <p className="mt-2 text-sm text-ink-soft">
           Competition and playing partners for golfers without a regular group.
         </p>
       </div>
+
+      {!firebaseConfigured && (
+        <div className="mb-4 rounded-sm border border-stale/40 bg-stale/10 p-3 text-sm text-ink-soft">
+          Sign-in isn't available yet — this deployment is missing its Firebase
+          configuration. Add the <code>VITE_FIREBASE_*</code> keys to enable it.
+        </div>
+      )}
 
       {stage === 'phone' ? (
         <div className="space-y-4">
@@ -96,7 +105,7 @@ export function SignIn() {
           <Button
             variant="primary"
             className="w-full"
-            disabled={busy || phone.replace(/\D/g, '').length < 10}
+            disabled={busy || !firebaseConfigured || phone.replace(/\D/g, '').length < 10}
             onClick={sendCode}
           >
             {busy ? 'Sending…' : 'Text me a code'}
@@ -135,7 +144,7 @@ export function SignIn() {
         <Rule className="flex-1" />
       </div>
 
-      <Button variant="ghost" className="w-full" onClick={google}>
+      <Button variant="ghost" className="w-full" disabled={!firebaseConfigured} onClick={google}>
         Continue with Google
       </Button>
 

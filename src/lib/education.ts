@@ -14,13 +14,15 @@ export interface PreMatchCard {
   primer: string; // the match-play, quickly paragraph
 }
 
+// Keyed by the number of competitors STILL ALIVE entering the round. Two left
+// is the Final; four is the Semifinal; sixteen is the Round of 16.
 const ROUND_NAMES: Record<number, string> = {
-  1: 'Final',
-  2: 'Semifinal',
-  4: 'Quarterfinal',
-  8: 'Round of 16',
-  16: 'Round of 32',
-  32: 'Round of 64',
+  2: 'Final',
+  4: 'Semifinal',
+  8: 'Quarterfinal',
+  16: 'Round of 16',
+  32: 'Round of 32',
+  64: 'Round of 64',
 };
 
 export function roundLabel(entriesRemaining: number): string {

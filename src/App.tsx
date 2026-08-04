@@ -7,7 +7,9 @@
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { Spinner } from '@/components/ui';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { BottomNav } from '@/components/BottomNav';
+import { Masthead } from '@/components/Mark';
 import { SignIn } from '@/features/auth/SignIn';
 import { Onboarding } from '@/features/onboarding/Onboarding';
 import { BoardPage } from '@/features/board/BoardPage';
@@ -33,6 +35,7 @@ function Shell() {
 
   return (
     <div className="min-h-dvh pb-16">
+      <Masthead marketName={profile.marketId === 'kc' ? 'Kansas City' : profile.marketId.toUpperCase()} />
       <Routes>
         <Route path="/" element={<BoardPage />} />
         <Route path="/post/new" element={<CreatePostPage />} />
@@ -51,10 +54,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Shell />
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <Shell />
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

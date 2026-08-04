@@ -129,10 +129,12 @@ function AvailabilityPicker({
 function ResultForm({
   matchId,
   entries,
+  nameOf,
   onError,
 }: {
   matchId: string;
   entries: EntryWithId[];
+  nameOf: (entryId: string) => string;
   onError: (m: string | null) => void;
 }) {
   const [winner, setWinner] = useState<string>('');
@@ -170,7 +172,7 @@ function ResultForm({
               winner === e.id ? 'bg-tournament text-paper' : 'border border-rule-strong text-ink'
             }`}
           >
-            {e.teamName ?? e.captainId.slice(0, 6)}
+            {nameOf(e.id)}
           </button>
         ))}
       </div>
@@ -343,7 +345,8 @@ export function MatchPage() {
         ? `Forfeited${match.forfeitReason ? ` — ${match.forfeitReason}` : ''}`
         : 'Voided — weather';
 
-  const iSubmitted = match.result.submittedBy === uid;
+  // submittedBy is an ENTRY id, not a uid — compare against my entry.
+  const iSubmitted = !!youEntry && match.result.submittedBy === youEntry.id;
 
   return (
     <div className="mx-auto max-w-sheet px-4 py-6">
@@ -479,7 +482,7 @@ export function MatchPage() {
                 <p className="font-display uppercase tracking-wide text-xs text-ink-soft">
                   Report the result
                 </p>
-                <ResultForm matchId={match.id} entries={twoEntries} onError={setError} />
+                <ResultForm matchId={match.id} entries={twoEntries} nameOf={entryName} onError={setError} />
               </>
             )}
           </div>
@@ -489,7 +492,7 @@ export function MatchPage() {
           <div className="space-y-4">
             <CommitteeNote />
             {myEntry ? (
-              <ResultForm matchId={match.id} entries={twoEntries} onError={setError} />
+              <ResultForm matchId={match.id} entries={twoEntries} nameOf={entryName} onError={setError} />
             ) : (
               <p className="text-sm text-ink-faint">Waiting on the competitors to report.</p>
             )}

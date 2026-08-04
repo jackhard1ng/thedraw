@@ -27,8 +27,21 @@ const config = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+// True only when the web config is actually present. Guards against the
+// white-screen-of-death when env vars are missing on a fresh deploy.
+export const firebaseConfigured = Boolean(
+  config.apiKey && config.projectId && config.appId,
+);
+
 export const app = initializeApp(config);
-export const auth = getAuth(app);
+
+// getAuth() validates the API key EAGERLY and throws synchronously on a bad or
+// missing one — which at module load is an uncatchable white screen. Guard it so
+// a misconfigured deploy degrades to a signed-out app with a clear notice
+// instead of a blank page. Firestore/Functions initialize lazily and are safe.
+export const auth = firebaseConfigured
+  ? getAuth(app)
+  : (undefined as unknown as ReturnType<typeof getAuth>);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
 export const googleProvider = new GoogleAuthProvider();
@@ -37,7 +50,7 @@ export const DEFAULT_MARKET_ID =
   (import.meta.env.VITE_DEFAULT_MARKET_ID as string) || 'kc';
 
 // Local development against the Firebase emulator suite.
-if (import.meta.env.VITE_USE_EMULATORS === 'true') {
+if (firebaseConfigured && import.meta.env.VITE_USE_EMULATORS === 'true') {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
