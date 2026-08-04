@@ -357,6 +357,39 @@ export interface HoleResult {
 }
 
 // ---------------------------------------------------------------------------
+// scorecards/{scorecardId} — a player's score in a stroke-play tournament round
+// (gross foursome, multi-round stroke play). Match-play results live on `matches`
+// instead. Doc id: `${tournamentId}_${entryId}_${round}`. Confirmation mirrors
+// match results: silence auto-confirms (§P1).
+// ---------------------------------------------------------------------------
+export interface Scorecard {
+  tournamentId: string;
+  entryId: string;
+  userId: string;
+  round: number;
+  placeId: string; // designated per round for net comparison (§4)
+  gross: number; // strokes
+  courseHandicap: number | null; // frozen; null if course lacks tee data
+  net: number | null; // gross - courseHandicap
+  holes: HoleResult[] | null; // modeled now, populated Phase 4
+  submittedBy: string | null;
+  confirmedBy: string | null;
+  confirmDeadline: Ts | null;
+  scorecardPhotoUrl: string | null;
+  status: 'awaitingResult' | 'awaitingConfirmation' | 'complete' | 'disputed';
+}
+
+// ---------------------------------------------------------------------------
+// follows/{followerId}_{targetId} — spectating (§5). Notify when a followed
+// player's result posts.
+// ---------------------------------------------------------------------------
+export interface Follow {
+  followerId: string;
+  targetId: string;
+  createdAt: Ts;
+}
+
+// ---------------------------------------------------------------------------
 // rounds/{roundId} — casual / self-reported. Separate from competitive results.
 // ---------------------------------------------------------------------------
 export type TeePosition =
