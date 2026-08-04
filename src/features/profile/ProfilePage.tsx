@@ -189,6 +189,25 @@ export function ProfilePage() {
         <SelfReportedRounds userId={fbUser.uid} />
       </div>
 
+      {/* Money rails — no stored value; winnings pay out to your own account (§7) */}
+      <div className="mt-8">
+        <SectionHeader>Account</SectionHeader>
+        <div className="divide-y divide-rule">
+          <Link to="/payouts" className="flex items-center justify-between py-3">
+            <span>Set up payouts</span>
+            <span className="text-ink-faint">→</span>
+          </Link>
+          <Link to="/wallet" className="flex items-center justify-between py-3">
+            <span>Saved card for one-tap re-entry</span>
+            <span className="text-ink-faint">→</span>
+          </Link>
+          <Link to="/request-event" className="flex items-center justify-between py-3">
+            <span>Request an event</span>
+            <span className="text-ink-faint">→</span>
+          </Link>
+        </div>
+      </div>
+
       <Rule className="my-8" />
 
       <div className="space-y-3">

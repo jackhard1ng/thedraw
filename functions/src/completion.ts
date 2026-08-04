@@ -110,7 +110,7 @@ export async function maybeCompleteTournament(tournamentId: string) {
           console.error(`payout failed for ${captain}: ${(err as Error).message}`);
         }
       } else {
-        await notify({ userId: captain, title: 'You won — set up payouts', body: 'Set up payouts to receive your prize. The Draw never holds your money.', deadlineCritical: true, link: '/me/payouts' });
+        await notify({ userId: captain, title: 'You won — set up payouts', body: 'Set up payouts to receive your prize. The Draw never holds your money.', deadlineCritical: true, link: '/payouts' });
       }
       await writeLedger({ type: 'payout', amountCents: a.amountCents, fromUserId: null, toUserId: captain, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}` });
     }

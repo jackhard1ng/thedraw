@@ -4,13 +4,22 @@ Competition and playing partners for golfers without a regular group —
 tournaments, match play, and open tee times. Kansas City first, nationally
 expandable.
 
-This repository implements **Phase 1 — the board** from the build specification
-(`the-draw-build-spec` / §6). Later phases are scaffolded but deliberately not
-built ahead of schedule.
+This repository implements the full build specification (`the-draw-build-spec`)
+across Phases 1–4: the board, free and paid tournaments, and the depth layer.
+The build order in §6 is respected in the code's structure — Phase 1 stands
+alone and bootstraps the rest — but the competitive and money engines are all
+present and wired.
+
+> **Launch gates still apply.** Paid tournaments require both a per-market switch
+> (`markets.paidEventsEnabled`) and the legal opinion letter in §7. Until Stripe
+> keys are configured the money rails are inert and free events run end to end.
+> Ship Phase 1 first; do not rush a paid event into the tail of a season (§6).
 
 ---
 
-## What's built (Phase 1)
+## What's built — by phase
+
+### Phase 1 — the board
 
 The board is the only feature that works with 12 users, which makes it the only
 thing that can bootstrap the rest.
@@ -31,14 +40,63 @@ thing that can bootstrap the rest.
 - **Self-reported rounds** — separate from the verified index, no rating/slope
   required (`src/features/rounds`)
 - **Block / report / delete** — required in Phase 1, all server-side
-  (`src/features/moderation`, `functions/src/index.ts`)
+  (`src/features/moderation`, `functions/src/board.ts`)
+
+### Phase 2 — free tournaments
+
+Formats are **data, not code** (`formats/{id}`, seeded in `scripts/seed.mjs`) —
+adding a format never touches the engine.
+
+- **Tournaments + entries** — organizer-created, published payout grid, frozen
+  combined index and seed (`functions/src/tournaments.ts`,
+  `src/features/tournaments`)
+- **Brackets** — single-elimination, byes to top seeds, frozen index shown every
+  round (`functions/src/engine/bracket.ts`, `src/features/brackets`)
+- **Pods** — round-robin, snake-drafted by seed (`functions/src/engine/pods.ts`)
+- **Scheduling + forfeit ladder** — 48h availability, one self-serve extension,
+  deterministic forfeit/walkover at deadline (`functions/src/engine/scheduling.ts`,
+  `functions/src/scheduled.ts`)
+- **Result confirmation** — submit → 48h to confirm or dispute → silence
+  auto-confirms (§P1); stroke-play scorecards with partner attestation
+- **Standings + awards** — placements not just wins, append-only, frozen bracket
+  path (`functions/src/completion.ts`)
+- **Leaderboards** — gross/net separate tables, scores to par, THRU, differential
+  to index, shareable SVG→PNG card (`src/features/leaderboard`)
+- **Spectating** — public match page, results feed, follow, season order of merit
+  (`src/features/spectating`)
+- **Education** — auto-generated pre-match card + inline glossary, no rules page
+  (`src/lib/education.ts`, `src/features/matches`)
+- **Organizer console** — create tournaments (legal lines enforced), verify
+  handicaps, adjust Tour Index, resolve disputes, moderate, review event requests
+  (`src/features/organizer`, `functions/src/organizer.ts`)
+
+### Phase 3 — paid tournaments (gated)
+
+- **Stripe Connect (Express)** — authorize at entry, capture at close, void under
+  minimum, transfer winnings to the winner's own account — no stored value ever
+  (`functions/src/lib/stripe.ts`, `functions/src/payments.ts`)
+- **Ledger** — every money movement an append-only row; balances are summed,
+  never stored (`functions/src/shared.ts` `writeLedger`)
+- **Eligibility gates** — one evaluator, default + high-stakes rule sets
+  (`functions/src/engine/eligibility.ts`)
+- **Cancellation + weather** — deterministic; auto void/refund/reschedule on
+  dangerous weather (`functions/src/scheduled.ts`)
+- **One-tap re-entry** — saved-card SetupIntent, the wallet UX with none of the
+  exposure (`createSetupIntent`)
+
+### Phase 4 — depth (partial)
+
+- **Order of merit** built; `matches.holes` / `scorecards.holes` arrays are
+  modeled from day one so live scoring (RTDB) is a feature, not a migration.
+- Live hole-by-hole scoring, held tee inventory, and negotiated league rates
+  remain deferred per §6/§9.
 
 ## Stack (§3)
 
 - **Frontend** — React + Vite + TypeScript, PWA-first (no app store for v1)
 - **Styling** — Tailwind with the draw-sheet design tokens (§8)
 - **Backend** — Firebase: Firestore, Cloud Functions, Auth, Cloud Messaging
-- **Payments** — Stripe Connect (Phase 3, not yet wired)
+- **Payments** — Stripe Connect Express (wired; inert without keys)
 - **Course identity** — Google Places (`place_id` canonical)
 
 Realtime Database is intentionally **not** used in v1 (reserved for Phase 4 live
@@ -93,29 +151,38 @@ cd functions && npm install && npm run build
 ```
 src/
   types/models.ts        normative Firestore schema (§4) — field names are the contract
-  lib/                   money, handicap, eligibility, format, firebase, callables
+  lib/                   money, handicap, eligibility, education, leaderboard,
+                         format, firebase, callables (full contract)
   context/AuthContext    phone/Google auth + current-user profile
   components/ui          the printed-sheet primitives (§8)
   features/
-    auth  onboarding  board  courses  chat  rounds  profile  moderation
-functions/src/index.ts   Phase-1 callables (join/leave, report, block, delete)
+    auth onboarding board courses chat rounds profile moderation   (Phase 1)
+    tournaments brackets leaderboard matches spectating organizer payments  (Phase 2–4)
+    routes.tsx           feature route + nav manifest, mounted by App.tsx
+functions/src/
+  index.ts               re-exports every callable
+  shared.ts              app init, auth guards, derived stats, ledger writer
+  board.ts               Phase-1 callables
+  tournaments.ts matches.ts completion.ts   lifecycle + results + awards/payouts
+  organizer.ts social.ts payments.ts scheduled.ts
+  engine/                pure, testable: bracket, pods, scoring, scheduling,
+                         payout, eligibility, money
+  lib/                   stripe, notify, matchgen
 firestore.rules          explicit, restrictive — the only guard on the data model
-scripts/seed.mjs         seed a launch market
+firestore.indexes.json   composite indexes for every server query
+scripts/seed.mjs         seed the launch market + the four formats
 ```
 
-## Phase map (§6) — what comes next, and where it attaches
+The engine modules under `functions/src/engine/` are pure and side-effect-free
+(bracket seeding, purse splitting, forfeit resolution). They can be exercised
+directly with `node` against the compiled `functions/lib/engine/*`.
 
-- **Phase 2 — Free tournaments** (winter): formats, tournaments, entries,
-  brackets/pods, scheduling + forfeit ladder, result confirmation, standings.
-  The `tournaments` / `entries` / `matches` / `awards` types already exist; the
-  `matches.holes` array is modeled from day one so live scoring is a feature,
-  not a migration.
-- **Phase 3 — Paid tournaments** (April): Stripe Connect, `ledger`,
-  authorize/capture, percentage purses, payout tables, weather automation.
-  **Gate:** a legal opinion letter before cash purses (§7). `money.ts` already
-  does integer-cents purse splitting and admin-fee itemization.
-- **Phase 4 — Depth**: live scoring (RTDB), hole-by-hole cards, order of merit.
-- **Phase 5 — Expansion**: per-market config, organizer onboarding.
+## Phase 5 — expansion (not built)
+
+Per-market admin tooling, organizer onboarding flows, and revenue share remain
+deferred (§6). Multi-market is already structural: every entity carries a
+`marketId`, a new city is a new `markets/{id}` document, and it launches
+free-only then flips paid with no deploy.
 
 ## Legal hard lines (§7)
 

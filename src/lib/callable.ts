@@ -97,7 +97,9 @@ export const submitAvailability = httpsCallable<
   { matchId: string; dates: number[] },
   { ok: boolean; status: string }
 >(functions, 'submitAvailability');
-export const useExtension = httpsCallable<{ matchId: string }, { ok: boolean }>(
+// Named requestExtension (not useExtension) so it isn't mistaken for a React
+// hook; the underlying Cloud Function is still 'useExtension'.
+export const requestExtension = httpsCallable<{ matchId: string }, { ok: boolean }>(
   functions,
   'useExtension',
 );

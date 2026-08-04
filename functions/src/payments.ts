@@ -8,7 +8,7 @@ import { onCall } from 'firebase-functions/v2/https';
 import { db, requireAuth, requireActive } from './shared';
 import { connectOnboardingLink, ensureCustomer, createSetupIntent as stripeSetupIntent } from './lib/stripe';
 
-const RETURN_URL = process.env.APP_URL ? `${process.env.APP_URL}/me/payouts` : 'https://thedraw.app/me/payouts';
+const RETURN_URL = process.env.APP_URL ? `${process.env.APP_URL}/payouts` : 'https://thedraw.app/payouts';
 
 export const createConnectOnboardingLink = onCall<Record<string, never>>(async (req) => {
   const uid = requireAuth(req.auth);

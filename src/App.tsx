@@ -15,6 +15,7 @@ import { CreatePostPage } from '@/features/board/CreatePostPage';
 import { PostDetailPage } from '@/features/board/PostDetailPage';
 import { LogRoundPage } from '@/features/rounds/LogRoundPage';
 import { ProfilePage } from '@/features/profile/ProfilePage';
+import { featureRoutes } from '@/features/routes';
 
 function Shell() {
   const { fbUser, profile, loading } = useAuth();
@@ -38,6 +39,9 @@ function Shell() {
         <Route path="/post/:postId" element={<PostDetailPage />} />
         <Route path="/rounds/new" element={<LogRoundPage />} />
         <Route path="/me" element={<ProfilePage />} />
+        {/* Phase 2–5 feature routes (tournaments, matches, spectating,
+            organizer, payments) — mounted from the feature manifest. */}
+        {featureRoutes}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <BottomNav />
