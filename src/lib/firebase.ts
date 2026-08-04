@@ -1,0 +1,44 @@
+/**
+ * Firebase initialization (spec §3).
+ *
+ *   Backend:  Firestore (primary), Cloud Functions, Auth, Cloud Messaging.
+ *   Auth:     Phone (SMS) primary — golfers respond to texts, not email.
+ *             Google sign-in secondary.
+ *   Realtime Database is NOT used in v1 (deferred to Phase 4 live scoring).
+ *
+ * The web config values are public by design; access is enforced by
+ * firestore.rules, not by hiding the API key.
+ */
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  connectAuthEmulator,
+  GoogleAuthProvider,
+} from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+
+const config = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+export const app = initializeApp(config);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const functions = getFunctions(app);
+export const googleProvider = new GoogleAuthProvider();
+
+export const DEFAULT_MARKET_ID =
+  (import.meta.env.VITE_DEFAULT_MARKET_ID as string) || 'kc';
+
+// Local development against the Firebase emulator suite.
+if (import.meta.env.VITE_USE_EMULATORS === 'true') {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+}

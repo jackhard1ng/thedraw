@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design system — spec §8. Ink on warm paper, ruled lines, tabular figures. */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+
+  body {
+    margin: 0;
+    /* safe-area for iOS PWA standalone display */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* All numerals monospace + tabular — non-negotiable (§8). Applied to any
+     element tagged .tnum; the mono font is already tabular-friendly. */
+  .tnum {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display uppercase tracking-wide text-ink;
+  }
+}
+
+@layer components {
+  /* The structural motif: a horizontal rule, like the rails of a draw sheet. */
+  .sheet-rule {
+    @apply border-t border-rule;
+  }
+
+  /* Primary action — thumb-reachable, tournament red. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-sm
+      px-4 py-3 font-display uppercase tracking-wide text-sm
+      transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-tournament text-paper hover:bg-tournament-soft;
+  }
+  .btn-ghost {
+    @apply btn border border-rule-strong bg-transparent text-ink hover:bg-paper-sunken;
+  }
+  .btn-quiet {
+    @apply btn bg-transparent text-ink-soft hover:text-ink;
+  }
+
+  .field-label {
+    @apply block font-display uppercase tracking-wide text-xs text-ink-soft mb-1;
+  }
+  .field-input {
+    @apply w-full rounded-sm border border-rule-strong bg-paper-raised
+      px-3 py-3 text-ink placeholder:text-ink-faint
+      focus:border-tournament focus:outline-none;
+  }
+}

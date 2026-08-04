@@ -1,0 +1,146 @@
+/**
+ * The board — Phase 1's killer feature (spec §4). An empty board is a dead
+ * product, so posting is one tap away and filters default to "show me joinable
+ * rounds" rather than an empty strict query.
+ */
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { useBlockedIds } from '@/features/moderation/useBlocks';
+import { Button, Spinner } from '@/components/ui';
+import { RoundPostCard } from './RoundPostCard';
+import {
+  applyFilters,
+  DEFAULT_FILTERS,
+  useRoundPosts,
+  type BoardFilters,
+} from './useRoundPosts';
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 rounded-full border px-3 py-1 text-xs font-display uppercase tracking-wide transition-colors ${
+        active
+          ? 'border-ink bg-ink text-paper'
+          : 'border-rule-strong text-ink-soft hover:border-ink'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function BoardPage() {
+  const { profile, fbUser } = useAuth();
+  // profile is guaranteed non-null on this route (see App gating).
+  const marketId = profile?.marketId ?? 'kc';
+  const blockedIds = useBlockedIds(fbUser?.uid);
+
+  const posts = useRoundPosts(marketId, blockedIds);
+  const [filters, setFilters] = useState<BoardFilters>(DEFAULT_FILTERS);
+
+  const visible = useMemo(
+    () => (posts ? applyFilters(posts, filters) : []),
+    [posts, filters],
+  );
+
+  return (
+    <div className="mx-auto max-w-sheet px-4 pb-28 pt-4">
+      <div className="mb-4 flex items-baseline justify-between">
+        <h1 className="text-2xl">The Board</h1>
+        <span className="text-xs uppercase tracking-widest text-ink-faint">
+          Kansas City
+        </span>
+      </div>
+
+      <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+        <FilterChip
+          active={filters.bookedOnly}
+          onClick={() => setFilters((f) => ({ ...f, bookedOnly: !f.bookedOnly }))}
+        >
+          Booked only
+        </FilterChip>
+        <FilterChip
+          active={filters.vibe === 'competitive'}
+          onClick={() =>
+            setFilters((f) => ({
+              ...f,
+              vibe: f.vibe === 'competitive' ? 'all' : 'competitive',
+            }))
+          }
+        >
+          Competitive
+        </FilterChip>
+        <FilterChip
+          active={filters.vibe === 'casual'}
+          onClick={() =>
+            setFilters((f) => ({ ...f, vibe: f.vibe === 'casual' ? 'all' : 'casual' }))
+          }
+        >
+          Casual
+        </FilterChip>
+        <FilterChip
+          active={filters.stakes === 'money'}
+          onClick={() =>
+            setFilters((f) => ({
+              ...f,
+              stakes: f.stakes === 'money' ? 'all' : 'money',
+            }))
+          }
+        >
+          Stakes
+        </FilterChip>
+        <FilterChip
+          active={filters.openSlotsOnly}
+          onClick={() =>
+            setFilters((f) => ({ ...f, openSlotsOnly: !f.openSlotsOnly }))
+          }
+        >
+          Open slots
+        </FilterChip>
+      </div>
+
+      {posts === null ? (
+        <Spinner />
+      ) : visible.length === 0 ? (
+        <div className="rounded-sm border border-dashed border-rule-strong p-8 text-center">
+          <p className="font-display uppercase tracking-wide text-ink-soft">
+            Nothing on the board yet
+          </p>
+          <p className="mt-1 text-sm text-ink-faint">
+            Post a tee time and someone will fill it.
+          </p>
+          <Link to="/post/new" className="mt-4 inline-block">
+            <Button variant="primary">Post a round</Button>
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((p) => (
+            <RoundPostCard key={p.id} post={p} />
+          ))}
+        </div>
+      )}
+
+      <Link
+        to="/post/new"
+        className="fixed inset-x-0 bottom-6 z-20 mx-auto block w-fit"
+      >
+        <Button variant="primary" className="shadow-lg">
+          + Post a round
+        </Button>
+      </Link>
+    </div>
+  );
+}

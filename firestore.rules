@@ -1,0 +1,144 @@
+rules_version = '2';
+
+// Firestore security rules — spec §5 "Firestore security rules".
+//
+// The rule of thumb: client code works identically whether these rules are
+// tight or wide open, so this file is the ONLY thing standing between the
+// data model and a bad actor. Be explicit and restrictive.
+//
+//   Clients may READ  market-scoped public data.
+//   Clients may WRITE only: their own users doc, their own roundPosts,
+//                           their own rounds, chat messages, their own reports/blocks.
+//   Clients may NEVER write: tournaments, entries, matches, ledger,
+//                            reputationEvents, courses, markets, awards, teams.
+//   Everything above is Cloud Functions only (which use the Admin SDK and
+//   bypass these rules by design).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // A signed-in, non-banned user. Role is read from their users doc.
+    function actor() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isSignedIn() && actor().status != 'banned';
+    }
+
+    // ---- markets: read-only to clients; written by admin via Cloud Functions ----
+    match /markets/{marketId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ---- users: a user may create and edit ONLY their own document ----
+    // Sensitive, function-owned fields are frozen against client writes even
+    // on one's own doc (role, flags, verification, stripe ids, status).
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSelf(userId)
+        && request.resource.data.role == 'member'
+        && request.resource.data.status == 'active'
+        && request.resource.data.canCreatePaidEvents == false
+        // Verification is granted by an organizer via a Cloud Function, never
+        // self-asserted at signup — a client may claim a source but not a badge.
+        && request.resource.data.handicap.verifiedAt == null
+        && request.resource.data.handicap.verifiedBy == null;
+      allow update: if isSelf(userId)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.canCreatePaidEvents == resource.data.canCreatePaidEvents
+        && request.resource.data.organizerMarkets == resource.data.organizerMarkets
+        // handicap.verifiedBy / verifiedAt are set by organizers via functions;
+        // a self-declared source is the only thing a client may set here.
+        && (request.resource.data.handicap.source == 'self'
+            || request.resource.data.handicap == resource.data.handicap);
+      allow delete: if false; // deletion is a Cloud Function (anonymize + retain ledger)
+    }
+
+    // ---- courses: read-only; a client may PROPOSE a listed course via a
+    //      separate courseSubmissions collection, never write courses directly ----
+    match /courses/{placeId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /courseSubmissions/{subId} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.submittedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ---- roundPosts: a member owns their own posts; joins go through a
+    //      Cloud Function so slotsFilled and joinedUserIds stay authoritative ----
+    match /roundPosts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isActive()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.slotsFilled == 0
+        && request.resource.data.status == 'open';
+      // Owner may edit descriptive fields or cancel; join/leave is function-only,
+      // so joinedUserIds and slotsFilled must be unchanged on a client update.
+      allow update: if isActive()
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.joinedUserIds == resource.data.joinedUserIds
+        && request.resource.data.slotsFilled == resource.data.slotsFilled;
+      allow delete: if false; // cancel by setting status, never hard-delete
+    }
+
+    // ---- chat: message per post/match thread; author writes their own line ----
+    match /threads/{threadId}/messages/{messageId} {
+      allow read: if isActive();
+      allow create: if isActive()
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 2000;
+      allow update, delete: if false; // append-only
+    }
+
+    // ---- rounds: self-reported casual rounds, owned by the user ----
+    match /rounds/{roundId} {
+      allow read: if isSignedIn();
+      allow create: if isActive()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.source == 'selfReported';
+      allow update, delete: if isSelf(resource.data.userId)
+        && resource.data.source == 'selfReported';
+    }
+
+    // ---- moderation: a user creates blocks and reports; only functions read/act ----
+    match /blocks/{blockId} {
+      // A block doc id is `${blockerId}_${blockedId}`.
+      allow read: if isActive() && resource.data.blockerId == request.auth.uid;
+      allow create: if isActive() && request.resource.data.blockerId == request.auth.uid;
+      allow delete: if isActive() && resource.data.blockerId == request.auth.uid;
+      allow update: if false;
+    }
+    match /reports/{reportId} {
+      allow create: if isActive() && request.resource.data.reportedBy == request.auth.uid;
+      allow read, update, delete: if false; // routed to organizers via functions
+    }
+
+    // ---- everything the spec marks Cloud-Function-only: never client-writable ----
+    match /tournaments/{id}        { allow read: if isSignedIn(); allow write: if false; }
+    match /entries/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    match /matches/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    match /teams/{id}              { allow read: if isSignedIn(); allow write: if false; }
+    match /awards/{id}             { allow read: if isSignedIn(); allow write: if false; }
+    match /formats/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    match /ledger/{id}             { allow read: if false;        allow write: if false; }
+    match /reputationEvents/{id}   { allow read: if isSignedIn(); allow write: if false; }
+    match /eventRequests/{id} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.requestedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}
