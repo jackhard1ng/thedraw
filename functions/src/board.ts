@@ -94,6 +94,34 @@ export const submitReport = onCall<{
     createdAt: FieldValue.serverTimestamp(),
     status: 'open',
   });
+
+  // Report volume is a signal (§5): multiple INDEPENDENT open reports against
+  // one target surface to the organizer proactively, not in a queue.
+  const open = await db
+    .collection('reports')
+    .where('targetType', '==', targetType)
+    .where('targetId', '==', targetId)
+    .where('status', '==', 'open')
+    .get();
+  const reporters = new Set(open.docs.map((d) => (d.data() as { reportedBy: string }).reportedBy));
+  if (reporters.size >= 2) {
+    const market = (await db.doc(`markets/${user.marketId}`).get()).data() as
+      | { organizerIds: string[] }
+      | undefined;
+    const { notify } = await import('./lib/notify');
+    await Promise.all(
+      (market?.organizerIds ?? []).map((orgId) =>
+        notify({
+          userId: orgId,
+          title: `${reporters.size} reports against one ${targetType}`,
+          body: 'Multiple independent reports on the same target — worth a look now.',
+          deadlineCritical: true,
+          link: '/organizer',
+        }),
+      ),
+    );
+  }
+
   return { reportId: ref.id };
 });
 

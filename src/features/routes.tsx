@@ -11,6 +11,7 @@ import { Route } from 'react-router-dom';
 
 import { TournamentListPage } from '@/features/tournaments/TournamentListPage';
 import { InstantEventPage } from '@/features/tournaments/InstantEventPage';
+import { TourPage } from '@/features/tour/TourPage';
 import { TournamentDetailPage } from '@/features/tournaments/TournamentDetailPage';
 import { TournamentBracketPage } from '@/features/tournaments/TournamentBracketPage';
 import { TournamentLeaderboardPage } from '@/features/tournaments/TournamentLeaderboardPage';
@@ -30,6 +31,7 @@ import { SavedCard } from '@/features/payments/SavedCard';
 export const featureRoutes = [
   <Route key="tournaments" path="/tournaments" element={<TournamentListPage />} />,
   <Route key="instant" path="/tournaments/new-game" element={<InstantEventPage />} />,
+  <Route key="tour" path="/tour" element={<TourPage />} />,
   <Route key="tournament" path="/tournaments/:id" element={<TournamentDetailPage />} />,
   <Route key="bracket" path="/tournaments/:id/bracket" element={<TournamentBracketPage />} />,
   <Route key="leaderboard" path="/tournaments/:id/leaderboard" element={<TournamentLeaderboardPage />} />,

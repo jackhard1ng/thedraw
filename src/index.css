@@ -39,14 +39,16 @@
     @apply border-t border-rule;
   }
 
-  /* Primary action — thumb-reachable, tournament red. */
+  /* Primary action — thumb-reachable, championship blue, presses like a button. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-sm
+    @apply inline-flex items-center justify-center gap-2 rounded-md
       px-4 py-3 font-display uppercase tracking-wide text-sm
-      transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+      transition-all duration-150 active:scale-[0.98]
+      disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100;
   }
   .btn-primary {
-    @apply btn bg-tournament text-paper hover:bg-tournament-soft;
+    @apply btn bg-tournament text-paper shadow-sm
+      hover:bg-tournament-soft hover:shadow-md;
   }
   .btn-ghost {
     @apply btn border border-rule-strong bg-transparent text-ink hover:bg-paper-sunken;
@@ -59,8 +61,71 @@
     @apply block font-display uppercase tracking-wide text-xs text-ink-soft mb-1;
   }
   .field-input {
-    @apply w-full rounded-sm border border-rule-strong bg-paper-raised
-      px-3 py-3 text-ink placeholder:text-ink-faint
-      focus:border-tournament focus:outline-none;
+    @apply w-full rounded-md border border-rule-strong bg-paper-raised
+      px-3 py-3 text-ink placeholder:text-ink-faint transition-shadow
+      focus:border-tournament focus:outline-none focus:ring-2 focus:ring-tournament/20;
+  }
+
+  /* Skeleton loading — shimmering placeholder instead of a "Loading…" label. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-paper-sunken;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55),
+      transparent
+    );
+    animation: shimmer 1.4s infinite;
+  }
+
+  /* The live-state pulse dot — quiet motion, tournament energy. */
+  .live-dot {
+    @apply relative inline-block h-2 w-2 rounded-full bg-tournament;
+  }
+  .live-dot::after {
+    content: '';
+    @apply absolute inset-0 rounded-full bg-tournament;
+    animation: ping-soft 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes ping-soft {
+  75%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  /* Content entrance — cards and rows rise in as data lands. */
+  .rise-in {
+    animation: rise-in 0.25s ease-out both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rise-in,
+    .skeleton::after,
+    .live-dot::after {
+      animation: none;
+    }
   }
 }

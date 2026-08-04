@@ -74,8 +74,26 @@ export function SignIn() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6">
-      <div className="mb-8 text-center">
+    <div className="relative mx-auto flex min-h-dvh max-w-sm flex-col justify-center overflow-hidden px-6">
+      {/* Faint bracket rails — the draw sheet ghosted behind the sign-in. */}
+      <svg
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full text-rule"
+        viewBox="0 0 400 800"
+        preserveAspectRatio="xMidYMid slice"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        aria-hidden="true"
+      >
+        <path d="M-20 80 H60 V180 H140 M-20 280 H60 V180" opacity="0.6" />
+        <path d="M140 180 H220 V330 H300" opacity="0.45" />
+        <path d="M-20 520 H60 V620 H140 M-20 720 H60 V620" opacity="0.6" />
+        <path d="M140 620 H220 V330" opacity="0.45" />
+        <path d="M300 330 H380" opacity="0.35" />
+        <circle cx="385" cy="330" r="5" className="text-ball" fill="currentColor" stroke="none" opacity="0.5" />
+      </svg>
+
+      <div className="relative mb-8 text-center">
         <Mark className="mx-auto mb-3 h-12 w-12 text-ink" />
         <h1 className="text-4xl">The Draw</h1>
         <p className="mt-2 text-sm text-ink-soft">

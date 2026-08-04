@@ -177,6 +177,25 @@ export const createInstantEvent = httpsCallable<
   { tournamentId: string }
 >(functions, 'createInstantEvent');
 
+// ---- Tour stops (addendum §7 — the backbone of a season) -------------------
+export const createTourSeries = httpsCallable<
+  { name: string; season: string },
+  { seriesId: string }
+>(functions, 'createTourSeries');
+export const createTourStop = httpsCallable<
+  {
+    seriesId: string;
+    weekNumber: number;
+    placeId: string;
+    startsAt: number;
+    teeTimesHeld: number;
+    entryFeeCents: number;
+    maxEntries: number;
+    flights: [number, number][];
+  },
+  { tournamentId: string }
+>(functions, 'createTourStop');
+
 // ---- Member event requests (Path B, member-initiated) ----------------------
 export const requestEvent = httpsCallable<
   {

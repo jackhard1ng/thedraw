@@ -75,8 +75,10 @@ export function Card({
   return (
     <div
       onClick={onClick}
-      className={`rounded-sm border border-rule bg-paper-raised ${
-        onClick ? 'cursor-pointer hover:border-rule-strong' : ''
+      className={`rise-in rounded-md border border-rule bg-paper-raised shadow-sm transition-all duration-150 ${
+        onClick
+          ? 'cursor-pointer hover:-translate-y-0.5 hover:border-rule-strong hover:shadow-md'
+          : ''
       } ${className}`}
     >
       {children}
@@ -117,14 +119,26 @@ export function SectionHeader({
   );
 }
 
+/** Shimmering placeholder block — size it with height and width classes. */
+export function Skeleton({ className = 'h-20' }: { className?: string }) {
+  return <div className={`skeleton ${className}`} aria-hidden="true" />;
+}
+
+/** Full-area loading state: a stack of shimmering rows, not a "Loading…" label. */
 export function Spinner() {
   return (
-    <div className="flex justify-center py-10 text-ink-faint">
-      <span className="font-display uppercase tracking-widest text-sm animate-pulse">
-        Loading…
-      </span>
+    <div className="mx-auto max-w-sheet space-y-3 px-4 py-8" aria-label="Loading">
+      <Skeleton className="h-7 w-44" />
+      <Skeleton className="h-24" />
+      <Skeleton className="h-24" />
+      <Skeleton className="h-24" />
     </div>
   );
+}
+
+/** A pulsing live indicator — pair with a label, e.g. <Live /> LIVE. */
+export function Live() {
+  return <span className="live-dot mr-1.5 align-middle" aria-hidden="true" />;
 }
 
 /** Contextual glossary term — tap for a one-sentence definition, no manual (§5). */
