@@ -86,4 +86,50 @@ const FORMATS = [
 for (const f of FORMATS) await db.doc(`formats/${f.id}`).set(f, { merge: true });
 console.log(`Seeded ${FORMATS.length} formats`);
 
+// Instant-event templates (addendum §2) — the 10% tier. Members instantiate
+// these; the template is the organizer's act.
+const TEMPLATES = [
+  {
+    id: 'sundayFoursome',
+    marketId: 'kc',
+    name: 'Sunday Foursome',
+    formatId: 'grossFoursome',
+    fieldSize: 4,
+    entryFeeMinCents: 2000,
+    entryFeeMaxCents: 20000,
+    allowedPayoutShapes: ['winnerTakeAll', '70_30', '60_30_10'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
+  {
+    id: 'headToHead',
+    marketId: 'kc',
+    name: 'Head-to-Head Match',
+    formatId: 'singlesMatch',
+    fieldSize: 2,
+    entryFeeMinCents: 2000,
+    entryFeeMaxCents: 10000,
+    allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
+  {
+    id: 'twoVTwoScramble',
+    marketId: 'kc',
+    name: '2v2 Scramble',
+    formatId: 'twoManScramble',
+    fieldSize: 2, // two team entries
+    entryFeeMinCents: 4000,
+    entryFeeMaxCents: 20000,
+    allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
+];
+for (const t of TEMPLATES) await db.doc(`eventTemplates/${t.id}`).set(t, { merge: true });
+console.log(`Seeded ${TEMPLATES.length} instant-event templates`);
+
 process.exit(0);

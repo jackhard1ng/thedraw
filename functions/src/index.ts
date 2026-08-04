@@ -54,6 +54,8 @@ export {
 
 export { followUser, unfollowUser, requestEvent } from './social';
 
+export { createInstantEvent } from './instant';
+
 export { createConnectOnboardingLink, createSetupIntent } from './payments';
 
 export { tick } from './scheduled';

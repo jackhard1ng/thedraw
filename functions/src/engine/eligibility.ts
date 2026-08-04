@@ -107,6 +107,16 @@ export const DEFAULT_PAID_ELIGIBILITY: EligibilityRules = {
   indexRange: null,
 };
 
+/** Stricter gate for high-stakes events (addendum §5) — GHIN only, probed hard. */
+export const HIGH_STAKES_ELIGIBILITY: EligibilityRules = {
+  ...DEFAULT_PAID_ELIGIBILITY,
+  requiresGhinVerified: true,
+  maxHandicapVerificationAgeDays: 30,
+  minEventsCompleted: 10,
+  minAttendanceRate: 0.95,
+  minAccountAgeDays: 90,
+};
+
 export const FREE_ELIGIBILITY: EligibilityRules = {
   requiresCompleteProfile: false,
   maxHandicapVerificationAgeDays: 3650,

@@ -1,46 +1,50 @@
 import type { Config } from 'tailwindcss';
 
-// Design system — spec §8. The reference is the draw sheet posted outside the
-// pro shop before a championship: ink on warm paper, ruled lines, tabular figures.
+// Design system — spec §8, reskinned per addendum feedback: March-Madness-style
+// championship blue. The reference is still the printed draw sheet, but now the
+// bracket poster: cool white sheet, navy ink, a single championship blue for
+// advancement/wins/live state, and an orange ball-dot as the energy accent.
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Base: bone / warm paper white
+        // Base: cool bracket-sheet white
         paper: {
-          DEFAULT: '#F7F4EE',
-          raised: '#FCFAF5',
-          sunken: '#EFEBE1',
+          DEFAULT: '#F4F6FA',
+          raised: '#FBFCFE',
+          sunken: '#E9EDF4',
         },
-        // Ink: near-black with a warm cast, high contrast
+        // Ink: navy-black, high contrast
         ink: {
-          DEFAULT: '#1A1815',
-          soft: '#4A4640',
-          faint: '#78726A',
+          DEFAULT: '#0E1A2B',
+          soft: '#3A4A61',
+          faint: '#69788F',
         },
-        // Rule lines: light warm gray — the structural motif
+        // Rule lines: cool gray-blue — bracket rails, table dividers
         rule: {
-          DEFAULT: '#D9D3C7',
-          strong: '#C3BCAD',
+          DEFAULT: '#CBD5E3',
+          strong: '#AFBDD1',
         },
-        // Accent: a single deep tournament red for advancement, wins, live state
+        // Accent: championship blue for advancement, wins, and live state
         tournament: {
-          DEFAULT: '#9B2226',
-          soft: '#B84044',
+          DEFAULT: '#0A46C2',
+          soft: '#2E66DE',
         },
-        // Support: desaturated pine green, secondary only
+        // Energy accent: the ball — used sparingly (mark dot, live moments)
+        ball: '#E8720C',
+        // Support: slate steel, secondary only (replaces pine)
         pine: {
-          DEFAULT: '#3E5C4B',
-          soft: '#5A7A67',
+          DEFAULT: '#33567A',
+          soft: '#4F729A',
         },
         // Semantic: verification freshness badges
-        fresh: '#3E7A4E', // green   — under 30 days
+        fresh: '#1F7A4D', // green   — under 30 days
         stale: '#B8860B', // amber   — 30-90 days
-        expired: '#78726A', // gray  — beyond 90 / self-declared
+        expired: '#69788F', // gray  — beyond 90 / self-declared
       },
       fontFamily: {
-        // Headers: condensed sans, uppercase — draw sheet / scoreboard energy
+        // Headers: condensed sans, uppercase — bracket poster energy
         display: ['"Barlow Semi Condensed"', 'Oswald', 'Arial Narrow', 'sans-serif'],
         // Body: clean humanist sans
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
@@ -55,5 +59,4 @@ export default {
       },
     },
   },
-  plugins: [],
 } satisfies Config;

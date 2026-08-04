@@ -15,8 +15,8 @@ export default defineConfig({
         short_name: 'The Draw',
         description:
           'Competition and playing partners for golfers without a regular group.',
-        theme_color: '#9B2226',
-        background_color: '#F7F4EE',
+        theme_color: '#0A46C2',
+        background_color: '#F4F6FA',
         display: 'standalone',
         start_url: '/',
         icons: [

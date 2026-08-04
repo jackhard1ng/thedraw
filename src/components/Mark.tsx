@@ -1,6 +1,6 @@
 /**
  * The mark (spec §8): the bracket rail and the draw-flight ball path are the
- * same curve — one shape, both meanings. Used in the masthead and on sign-in.
+ * same curve — one shape, both meanings. Championship blue rail, orange ball.
  */
 export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
   return (
@@ -12,8 +12,8 @@ export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
         strokeWidth="4"
         strokeLinecap="square"
       />
-      <line x1="44" y1="32" x2="55" y2="32" stroke="#9B2226" strokeWidth="4" />
-      <circle cx="55" cy="32" r="4" fill="#9B2226" />
+      <line x1="44" y1="32" x2="55" y2="32" stroke="#0A46C2" strokeWidth="4" />
+      <circle cx="55" cy="32" r="4" fill="#E8720C" />
     </svg>
   );
 }

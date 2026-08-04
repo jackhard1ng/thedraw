@@ -143,6 +143,8 @@ service cloud.firestore {
     match /teams/{id}              { allow read: if isSignedIn(); allow write: if false; }
     match /awards/{id}             { allow read: if isSignedIn(); allow write: if false; }
     match /formats/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    match /eventTemplates/{id}     { allow read: if isSignedIn(); allow write: if false; }
+    match /tourStops/{id}          { allow read: if isSignedIn(); allow write: if false; }
     match /ledger/{id}             { allow read: if false;        allow write: if false; }
     match /reputationEvents/{id}   { allow read: if isSignedIn(); allow write: if false; }
 

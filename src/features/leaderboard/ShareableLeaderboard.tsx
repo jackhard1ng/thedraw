@@ -9,11 +9,11 @@ import { useRef } from 'react';
 import { Button, Spinner } from '@/components/ui';
 import { useLeaderboard } from './useLeaderboard';
 
-const PAPER = '#F7F4EE';
-const INK = '#1A1815';
-const INK_FAINT = '#78726A';
-const RULE = '#D9D3C7';
-const RED = '#9B2226';
+const PAPER = '#F4F6FA';
+const INK = '#0E1A2B';
+const INK_FAINT = '#69788F';
+const RULE = '#CBD5E3';
+const RED = '#0A46C2';
 
 export function ShareableLeaderboard({ tournamentId }: { tournamentId: string }) {
   const { ready, tournament, gross } = useLeaderboard(tournamentId);

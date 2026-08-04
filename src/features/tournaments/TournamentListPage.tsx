@@ -112,9 +112,13 @@ export function TournamentListPage() {
     <div className="mx-auto max-w-sheet px-4 pb-28 pt-4">
       <div className="mb-4 flex items-baseline justify-between">
         <h1 className="text-2xl">Tournaments</h1>
-        <span className="text-xs uppercase tracking-widest text-ink-faint">
-          {marketId.toUpperCase()}
-        </span>
+        {/* Instant events (addendum §2) — self-serve template instantiation */}
+        <Link
+          to="/tournaments/new-game"
+          className="font-display uppercase tracking-wide text-xs text-tournament underline underline-offset-2"
+        >
+          + Start a game
+        </Link>
       </div>
 
       <div className="mb-4 flex gap-2">

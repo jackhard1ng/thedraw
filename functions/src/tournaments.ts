@@ -214,8 +214,10 @@ export const enterTournament = onCall(async (req) => {
   }
   if (t.entryIds.length >= t.maxEntries) throw new HttpsError('failed-precondition', 'Field is full.');
 
-  // §7.4 — organizer may not compete in an event they take a fee from.
-  if (t.createdBy === uid && t.adminFeePercent > 0) {
+  // §7.4 — an organizer may not compete in an event THEY take a fee from.
+  // Instant events are exempt (addendum §2): the template is the organizer's
+  // act, the PLATFORM takes the fee, and the creator is just a player.
+  if (t.createdBy === uid && t.adminFeePercent > 0 && !(t as { isInstant?: boolean }).isInstant) {
     throw new HttpsError('permission-denied', 'You cannot enter an event you take a fee from.');
   }
 

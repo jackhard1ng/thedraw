@@ -162,6 +162,21 @@ export const reviewEventRequest = httpsCallable<
   { ok: boolean }
 >(functions, 'reviewEventRequest');
 
+// ---- Instant events (addendum §2 — the 10% tier) ---------------------------
+// A member instantiates a pre-approved template: course, date, fee within the
+// template's bounds, payout shape from its allowed list. Live immediately.
+export const createInstantEvent = httpsCallable<
+  {
+    templateId: string;
+    placeId: string | null;
+    startsAt: number; // epoch ms
+    entryFeeCents: number;
+    payoutShape: string; // key from the template's allowedPayoutShapes
+    name?: string;
+  },
+  { tournamentId: string }
+>(functions, 'createInstantEvent');
+
 // ---- Member event requests (Path B, member-initiated) ----------------------
 export const requestEvent = httpsCallable<
   {

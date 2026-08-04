@@ -7,11 +7,14 @@
  * Brackets become immutable on completion; the trophy links to the frozen draw.
  */
 import { db, FieldValue, Timestamp, writeLedger } from './shared';
-import { computePayouts, type Division, type PayoutRow } from './engine/payout';
+import { computePayouts, type PayoutRow, type Standings } from './engine/payout';
 import { itemizeEntry } from './engine/money';
 import { payout as stripePayout, stripeEnabled } from './lib/stripe';
 import { rankPod } from './engine/pods';
 import { notify } from './lib/notify';
+
+/** Addendum §1: minimum admin fee of $10 per event. */
+export const MIN_EVENT_ADMIN_FEE_CENTS = 1000;
 
 interface EntryLite {
   id: string;
@@ -51,7 +54,7 @@ export async function maybeCompleteTournament(tournamentId: string) {
   const entriesSnap = await db.collection('entries').where('tournamentId', '==', tournamentId).get();
   const entries: EntryLite[] = entriesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 
-  let standings: Record<Division, string[]> = { gross: [], net: [] };
+  let standings: Standings = { gross: [], net: [] };
   const awardsToWrite: { entryId: string; placement: string; flight: string | null; path: any[] }[] = [];
 
   if (format?.scoring === 'matchPlay') {
@@ -93,26 +96,43 @@ export async function maybeCompleteTournament(tournamentId: string) {
 
   // --- Payouts (only for cash-purse events) ---
   if (t.entryFeeCents > 0 && t.prizeType === 'cashPurse') {
-    const { prizeCents } = itemizeEntry(t.entryFeeCents, t.adminFeePercent);
-    const poolCents = prizeCents * entries.filter((e) => e.status !== 'withdrawn').length;
+    const activeCount = entries.filter((e) => e.status !== 'withdrawn').length;
+    const { adminCents } = itemizeEntry(t.entryFeeCents, t.adminFeePercent);
+    // Addendum §1: minimum admin fee of $10 PER EVENT so a tiny field doesn't
+    // cost more in Stripe fees than it collects. If the percentage fee across
+    // the field falls short, the shortfall comes out of the pool.
+    const collectedCents = t.entryFeeCents * activeCount;
+    const adminTotal = Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS);
+    const poolCents = Math.max(0, collectedCents - adminTotal);
     const assignments = computePayouts(poolCents, t.payoutTable as PayoutRow[], standings, t.doubleDipRule);
     for (const a of assignments) {
       const e = entries.find((x) => x.id === a.entryId);
       if (!e) continue;
-      const captain = e.userIds[0];
-      const user = (await db.doc(`users/${captain}`).get()).data() as { stripeConnectId: string | null } | undefined;
-      let stripeRef = 'pending-onboarding';
-      if (stripeEnabled() && user?.stripeConnectId) {
-        try {
-          const tr = await stripePayout({ amountCents: a.amountCents, destinationConnectId: user.stripeConnectId, tournamentId, toUserId: captain });
-          stripeRef = tr.id;
-        } catch (err) {
-          console.error(`payout failed for ${captain}: ${(err as Error).message}`);
+      // Addendum §3: team prizes split EVENLY among members and are paid
+      // INDIVIDUALLY — never lumped to the captain. $360 to a duo = 2 × $180.
+      const members = e.userIds;
+      const base = Math.floor(a.amountCents / members.length);
+      const shares = members.map((_, i) =>
+        i === 0 ? a.amountCents - base * (members.length - 1) : base,
+      );
+      for (let i = 0; i < members.length; i++) {
+        const member = members[i];
+        const share = shares[i];
+        if (share <= 0) continue;
+        const user = (await db.doc(`users/${member}`).get()).data() as { stripeConnectId: string | null } | undefined;
+        let stripeRef = 'pending-onboarding';
+        if (stripeEnabled() && user?.stripeConnectId) {
+          try {
+            const tr = await stripePayout({ amountCents: share, destinationConnectId: user.stripeConnectId, tournamentId, toUserId: member });
+            stripeRef = tr.id;
+          } catch (err) {
+            console.error(`payout failed for ${member}: ${(err as Error).message}`);
+          }
+        } else {
+          await notify({ userId: member, title: 'You won — set up payouts', body: 'Set up payouts to receive your prize. The Draw never holds your money.', deadlineCritical: true, link: '/payouts' });
         }
-      } else {
-        await notify({ userId: captain, title: 'You won — set up payouts', body: 'Set up payouts to receive your prize. The Draw never holds your money.', deadlineCritical: true, link: '/payouts' });
+        await writeLedger({ type: 'payout', amountCents: share, fromUserId: null, toUserId: member, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}${members.length > 1 ? ` (team split ${i + 1}/${members.length})` : ''}` });
       }
-      await writeLedger({ type: 'payout', amountCents: a.amountCents, fromUserId: null, toUserId: captain, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}` });
     }
   }
 
@@ -160,7 +180,7 @@ async function completeBracket(tournamentId: string, bracketRounds: number, entr
   if (bracketRounds >= 2) for (const e of losersInRound(bracketRounds - 1)) awards.push({ entryId: e, placement: 'semifinalist', flight: null, path: await pathFor(e) });
   if (bracketRounds >= 3) for (const e of losersInRound(bracketRounds - 2)) awards.push({ entryId: e, placement: 'quarterfinalist', flight: null, path: await pathFor(e) });
 
-  const standings: Record<Division, string[]> = {
+  const standings: Standings = {
     gross: [champion, runnerUp, ...losersInRound(bracketRounds - 1)],
     net: [],
   };
@@ -189,7 +209,7 @@ async function completePods(tournamentId: string, entries: EntryLite[]) {
       awards.push({ entryId: ranked[0].entryId, placement: 'podWinner', flight: `Pod ${pi + 1}`, path: [] });
     }
   }
-  return { standings: { gross: winners, net: [] } as Record<Division, string[]>, awards };
+  return { standings: { gross: winners, net: [] } as Standings, awards };
 }
 
 // --- stroke play -----------------------------------------------------------
@@ -213,13 +233,34 @@ async function completeStrokePlay(tournamentId: string, entries: EntryLite[], ro
     }
   }
 
-  const grossOrder = [...grossByEntry.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
-  const netOrder = anyNet ? [...netByEntry.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id) : [];
+  // Group equal totals into tie groups (addendum §3: ties split the combined
+  // prize for the tied places evenly).
+  const toTieGroups = (byEntry: Map<string, number>): string[][] => {
+    const sorted = [...byEntry.entries()].sort((a, b) => a[1] - b[1]);
+    const groups: string[][] = [];
+    for (const [id, total] of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && byEntry.get(last[0]) === total) last.push(id);
+      else groups.push([id]);
+    }
+    return groups;
+  };
+
+  const grossGroups = toTieGroups(grossByEntry);
+  const netGroups = anyNet ? toTieGroups(netByEntry) : [];
 
   const awards: { entryId: string; placement: string; flight: string | null; path: any[] }[] = [];
   const placeName = ['champion', 'runnerUp', 'semifinalist'];
-  grossOrder.slice(0, 3).forEach((id, i) => awards.push({ entryId: id, placement: placeName[i], flight: 'gross', path: [] }));
-  if (netOrder.length) netOrder.slice(0, 1).forEach((id) => awards.push({ entryId: id, placement: 'flightWinner', flight: 'net', path: [] }));
+  // Everyone in a tied group gets the placement for the group's first place.
+  let place = 0;
+  for (const group of grossGroups) {
+    if (place >= 3) break;
+    for (const id of group) awards.push({ entryId: id, placement: placeName[Math.min(place, 2)], flight: 'gross', path: [] });
+    place += group.length;
+  }
+  if (netGroups.length) {
+    for (const id of netGroups[0]) awards.push({ entryId: id, placement: 'flightWinner', flight: 'net', path: [] });
+  }
 
-  return { standings: { gross: grossOrder, net: netOrder } as Record<Division, string[]>, awards };
+  return { standings: { gross: grossGroups, net: netGroups } as Standings, awards };
 }
