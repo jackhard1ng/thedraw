@@ -97,6 +97,17 @@ export const setAgreedTime = onCall<{
     'scheduling.bookedBy': req.data.bookedBy,
     status: 'scheduled',
   });
+  // Record "committed" once per match so attendance ("played X of Y committed",
+  // §4) is meaningful — it pairs 1:1 with the later played/noShow outcome.
+  if (!(match as MatchDoc & { committedRecorded?: boolean }).committedRecorded) {
+    const now = Date.now();
+    for (const entryId of match.entryIds) {
+      if (!entryId) continue;
+      const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+      for (const u of e?.userIds ?? []) await writeReputation(u, 'committed', req.data.matchId, now);
+    }
+    await ref.update({ committedRecorded: true });
+  }
   return { ok: true };
 });
 
