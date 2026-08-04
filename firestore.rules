@@ -121,20 +121,53 @@ service cloud.firestore {
       allow delete: if isActive() && resource.data.blockerId == request.auth.uid;
       allow update: if false;
     }
+    function isOrganizerOf(marketId) {
+      return isSignedIn()
+        && (actor().role == 'admin'
+            || (actor().role == 'organizer' && marketId in actor().organizerMarkets));
+    }
+
     match /reports/{reportId} {
       allow create: if isActive() && request.resource.data.reportedBy == request.auth.uid;
-      allow read, update, delete: if false; // routed to organizers via functions
+      // Organizers read their market's reports for the console; writes are
+      // function-only (status transitions happen in resolveDispute etc.).
+      allow read: if isOrganizerOf(resource.data.marketId);
+      allow update, delete: if false;
     }
 
     // ---- everything the spec marks Cloud-Function-only: never client-writable ----
     match /tournaments/{id}        { allow read: if isSignedIn(); allow write: if false; }
     match /entries/{id}            { allow read: if isSignedIn(); allow write: if false; }
     match /matches/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    match /scorecards/{id}         { allow read: if isSignedIn(); allow write: if false; }
     match /teams/{id}              { allow read: if isSignedIn(); allow write: if false; }
     match /awards/{id}             { allow read: if isSignedIn(); allow write: if false; }
     match /formats/{id}            { allow read: if isSignedIn(); allow write: if false; }
     match /ledger/{id}             { allow read: if false;        allow write: if false; }
     match /reputationEvents/{id}   { allow read: if isSignedIn(); allow write: if false; }
+
+    // Spectating: a client reads its own follow doc to know follow-state; the
+    // write goes through a Cloud Function. Public match/results reads use the
+    // tournaments/matches/entries reads above.
+    match /follows/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // In-app notifications: a user reads and marks-read their own.
+    match /notifications/{id} {
+      allow read: if isSelf(resource.data.userId);
+      allow update: if isSelf(resource.data.userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+
+    // Tour Index history is written by organizers via a function; readable so a
+    // player can see why their competition handicap changed.
+    match /users/{userId}/tourIndexLog/{logId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
     match /eventRequests/{id} {
       allow read: if isActive();
       allow create: if isActive() && request.resource.data.requestedBy == request.auth.uid;
