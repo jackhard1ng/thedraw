@@ -1,10 +1,22 @@
 /**
  * Green fees + the cancellation ladder (spec §5).
  *
- * "Debt between users must never exist." One player books with their card; on
- * match confirmation every player is charged their share immediately and the
- * app pays the booker out from collected funds. A no-show has already paid —
- * the course keeps it, and no one has to decide a fee is warranted.
+ * TWO MODES, and the default is the app doing NOTHING:
+ *
+ *   Default (~99% of tee times): green fees are PAID AT THE COURSE. Each
+ *   player pays the pro shop directly. No money moves through the platform,
+ *   nothing to split, nothing to reimburse.
+ *
+ *   Prepaid (opt-in): the booker actually fronted the whole group's cost
+ *   (prepaid online rates, some weekend munis). Only then does the booker
+ *   invoke collectGreenFees: each player's share is charged to their saved
+ *   card and the collected funds transfer to the booker. "Debt between users
+ *   must never exist" — the app either moves the money completely or stays
+ *   out completely; it never tracks an IOU.
+ *
+ *   Floor: shares under $10/player are refused — card-processing overhead on
+ *   pocket change approaches 15%, and a trivial sum settles in the parking
+ *   lot. The floor is what keeps the feature honest, not a limitation.
  *
  * Cancellation ladder (published before entry, deterministic §P1):
  *   >72h   — full refund, match returns to scheduling (one per season)
@@ -20,6 +32,9 @@ import { notify } from './lib/notify';
 
 const H = 3_600_000;
 
+/** Below this per-player share the app stays out — settle it at the course. */
+export const MIN_GREEN_FEE_SHARE_CENTS = 1000;
+
 /**
  * Booker collects green fees for a scheduled match. Each player's share is
  * charged off-session to their saved card; collected funds transfer to the
@@ -34,6 +49,12 @@ export const collectGreenFees = onCall<{
   const { matchId, perPlayerCents } = req.data;
   if (!Number.isInteger(perPlayerCents) || perPlayerCents <= 0 || perPlayerCents > 50000) {
     throw new HttpsError('invalid-argument', 'perPlayerCents must be a positive integer.');
+  }
+  if (perPlayerCents < MIN_GREEN_FEE_SHARE_CENTS) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Shares under $10 settle at the course — card fees would eat a split this small.',
+    );
   }
   if (!stripeEnabled()) throw new HttpsError('failed-precondition', 'Payments are not configured.');
 

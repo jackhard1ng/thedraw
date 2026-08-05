@@ -37,7 +37,9 @@ import {
   confirmResult,
   disputeResult,
   cancelScheduledMatch,
+  collectGreenFees,
 } from '@/lib/callable';
+import { dollarsToCents, formatCents } from '@/lib/money';
 import {
   bracketSize,
   entriesRemainingAt,
@@ -477,6 +479,48 @@ export function MatchPage() {
                 {course ? ` · ${course.name}` : ''}
               </p>
             </div>
+
+            {/* Green fees: default is pay-at-the-course — the app touches
+                nothing. The prepaid split is a quiet opt-in for the booker. */}
+            {match.greenFees?.collectedAt ? (
+              <p className="text-xs text-ink-faint">
+                Green fees collected —{' '}
+                <Num>{formatCents(match.greenFees.perPlayerCents)}</Num> each from{' '}
+                <Num>{match.greenFees.chargedUserIds.length}</Num> player
+                {match.greenFees.chargedUserIds.length === 1 ? '' : 's'}, reimbursed
+                to the booker.
+              </p>
+            ) : (
+              <p className="text-xs text-ink-faint">
+                Green fees are paid at the course.
+                {uid && match.scheduling.bookedBy === uid && (
+                  <>
+                    {' '}
+                    <button
+                      className="underline underline-offset-2 hover:text-tournament"
+                      onClick={async () => {
+                        const raw = window.prompt(
+                          'You prepaid the whole group? Enter each player\'s share in dollars (minimum $10) and their saved cards are charged — you get reimbursed automatically.',
+                        );
+                        if (!raw) return;
+                        setError(null);
+                        try {
+                          await collectGreenFees({
+                            matchId: match.id,
+                            perPlayerCents: dollarsToCents(raw),
+                          });
+                        } catch (e) {
+                          setError((e as Error).message);
+                        }
+                      }}
+                    >
+                      Prepaid the group? Split it.
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+
             <CommitteeNote />
             {myEntry && (
               <>

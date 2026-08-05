@@ -346,6 +346,16 @@ export interface Match {
   status: MatchStatus;
   forfeitedBy: string | null;
   forfeitReason: string | null;
+  /**
+   * Present ONLY when the booker prepaid and opted to split (§5). Default is
+   * green fees paid individually at the course — no money through the app.
+   */
+  greenFees?: {
+    perPlayerCents: number;
+    chargedUserIds: string[];
+    collectedAt: Ts;
+    refundPending: boolean;
+  } | null;
 }
 
 // Modeled from day one even though v1 only captures totals — the single line of
