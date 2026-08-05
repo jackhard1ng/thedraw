@@ -18,6 +18,7 @@ const path = require('node:path').join(__dirname, '..', 'functions');
 const admin = require(path + '/node_modules/firebase-admin');
 const fns = require(path + '/lib/index.js');
 const { maybeCompleteTournament } = require(path + '/lib/completion.js');
+const { boardSweep } = require(path + '/lib/boardlife.js');
 
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
@@ -329,6 +330,51 @@ async function main() {
   check('<24h cancel → forfeited', r2.outcome === 'forfeited', r2);
   const fm = (await db.doc('matches/lad_r1_m1').get()).data();
   check('forfeit charged to canceller, opponent advances', fm.forfeitedBy === 'ladC' && fm.result.winnerEntryId === 'ladD', { f: fm.forfeitedBy, w: fm.result.winnerEntryId });
+
+  // ================= FLOW E — board lifecycle: sweep, standing game, attest ==
+  console.log('\nFLOW E — board sweep + standing game + attestation');
+  const teeMs = Date.now() - 3600000; // an hour ago — due for completion
+  await db.doc('roundPosts/standing1').set({
+    marketId: 'kc', createdBy: 'p1', title: 'Saturday standing game', description: null,
+    timing: { mode: 'fixed', fixedTime: Timestamp.fromMillis(teeMs), windowStart: null, windowEnd: null, flexibleDays: null },
+    course: { mode: 'specific', placeId: 'course_x', preferredPlaceIds: null },
+    booking: 'booked', slotsTotal: 2, slotsFilled: 1, hosting: null,
+    vibe: 'open', stakes: 'open', handicapPref: 'any', handicapRange: null, format: 'open',
+    joinedUserIds: ['p2'], stakesAmount: null, stakesHandledByApp: false,
+    recurrence: 'weekly', status: 'full', createdAt: Timestamp.now(),
+  });
+  await boardSweep(Date.now());
+  check('post completed by sweep', (await db.doc('roundPosts/standing1').get()).data().status === 'completed');
+  const clones = await db.collection('roundPosts').where('standingOriginId', '==', 'standing1').get();
+  check('standing game respawned for next week', clones.size === 1);
+  if (clones.size) {
+    const c = clones.docs[0].data();
+    check('clone is open with fresh slots', c.status === 'open' && c.slotsFilled === 0 && c.joinedUserIds.length === 0);
+    check('clone tee time = +7 days', Math.abs(c.timing.fixedTime.toMillis() - (teeMs + 7 * 86400000)) < 1000);
+  }
+  // committed reputation written for the group
+  const repP2 = await db.collection('reputationEvents').where('userId', '==', 'p2').where('type', '==', 'committed').get();
+  check('committed reputation for joined player', repP2.size >= 1);
+
+  // Attestation: p2 logs a round on the post; p1 (groupmate) attests it.
+  const roundRef = await db.collection('rounds').add({
+    userId: 'p2', placeId: 'course_x', playedAt: Timestamp.now(), holes: 18, totalScore: 84,
+    teePosition: 'middle', teeName: null, yardage: null, source: 'selfReported',
+    attestedBy: null, roundPostId: 'standing1',
+  });
+  // self-attest rejected
+  let selfAttest = false;
+  try { await call(fns.attestRound, 'p2', { roundId: roundRef.id }); } catch { selfAttest = true; }
+  check('self-attest rejected', selfAttest);
+  // outsider rejected
+  let outsider = false;
+  try { await call(fns.attestRound, 'p3', { roundId: roundRef.id }); } catch { outsider = true; }
+  check('non-groupmate attest rejected', outsider);
+  await call(fns.attestRound, 'p1', { roundId: roundRef.id });
+  const attested = (await roundRef.get()).data();
+  check('groupmate attest → source attested', attested.source === 'attested' && attested.attestedBy === 'p1');
+  const playedRep = await db.collection('reputationEvents').where('userId', '==', 'p2').where('type', '==', 'played').get();
+  check('played reputation written on attest', playedRep.size >= 1);
 
   console.log(`\n========== ${pass} passed, ${fail} failed ==========`);
   process.exit(fail ? 1 : 0);

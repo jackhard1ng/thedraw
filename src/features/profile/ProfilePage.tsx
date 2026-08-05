@@ -15,9 +15,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   collection,
+  doc,
   onSnapshot,
   orderBy,
   query,
+  updateDoc,
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -89,11 +91,49 @@ function SelfReportedRounds({ userId }: { userId: string }) {
             <span className="ml-2 text-ink-faint">
               {r.holes} holes · {r.teePosition}
             </span>
+            {r.source === 'attested' && (
+              <span className="ml-2">
+                <Badge tone="fresh">Attested</Badge>
+              </span>
+            )}
           </div>
           <Num className="text-lg text-ink">{r.totalScore}</Num>
         </div>
       ))}
     </div>
+  );
+}
+
+/** Match alerts (opt-in): in-app notice when a matching round posts. */
+function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts: boolean; maxIndexDelta: number | null } }) {
+  const on = prefs?.newPostAlerts ?? false;
+  const [busy, setBusy] = useState(false);
+  async function toggle() {
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        alertPrefs: { newPostAlerts: !on, maxIndexDelta: prefs?.maxIndexDelta ?? 8 },
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <label className="flex items-center justify-between py-2 text-sm">
+      <span className="text-ink">
+        Alert me when a round near my level is posted
+        <span className="block text-xs text-ink-faint">
+          Within ±8 of your index, your market only.
+        </span>
+      </span>
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={busy}
+        onChange={toggle}
+        className="h-5 w-5 accent-tournament"
+      />
+    </label>
   );
 }
 
@@ -206,6 +246,12 @@ export function ProfilePage() {
             <span className="text-ink-faint">→</span>
           </Link>
         </div>
+      </div>
+
+      {/* Notifications */}
+      <div className="mt-6">
+        <SectionHeader>Alerts</SectionHeader>
+        <AlertPrefs userId={fbUser.uid} prefs={profile.alertPrefs} />
       </div>
 
       <Rule className="my-8" />

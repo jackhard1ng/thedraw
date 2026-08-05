@@ -48,6 +48,7 @@ export function CreatePostPage() {
   const [format, setFormat] = useState<RoundFormat>('open');
   const [handicapPref, setHandicapPref] = useState<HandicapPref>('any');
 
+  const [recurrence, setRecurrence] = useState(false); // standing game
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,6 +103,8 @@ export function CreatePostPage() {
         // Path A player-arranged stakes: the app never holds or routes money (§7).
         stakesAmount: null,
         stakesHandledByApp: false,
+        // Standing game: re-posts itself weekly when the tee time passes.
+        recurrence: recurrence && timingMode === 'fixed' ? 'weekly' : null,
         status: 'open',
         createdAt: serverTimestamp(),
       });
@@ -163,6 +166,17 @@ export function CreatePostPage() {
                 onChange={(e) => setFixedTime(e.target.value)}
               />
             </Field>
+          )}
+          {timingMode === 'fixed' && (
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink-soft">
+              <input
+                type="checkbox"
+                checked={recurrence}
+                onChange={(e) => setRecurrence(e.target.checked)}
+                className="h-4 w-4 accent-tournament"
+              />
+              Make this a standing game — re-posts itself every week
+            </label>
           )}
         </div>
 

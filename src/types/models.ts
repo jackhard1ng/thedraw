@@ -65,6 +65,11 @@ export interface User {
   stripeConnectId: string | null; // only if they've received payouts
   createdAt: Ts;
   status: UserStatus;
+  /** Match alerts (opt-in): notify when a matching round posts in my market. */
+  alertPrefs?: {
+    newPostAlerts: boolean;
+    maxIndexDelta: number | null; // null = any level
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +165,9 @@ export interface RoundPost {
   // Player-arranged stakes (spec Path A). The app NEVER holds or routes this.
   stakesAmount: null; // never captured
   stakesHandledByApp: false; // always false, no exception
+  /** Standing game: re-posts itself one week forward when it completes. */
+  recurrence?: 'weekly' | null;
+  standingOriginId?: string;
   status: RoundPostStatus;
   createdAt: Ts;
 }

@@ -15,6 +15,7 @@ import { resolveAtDeadline, type AvailabilityEntry } from './engine/scheduling';
 import { runClose } from './tournaments';
 import { finalizeMatch, forfeitMatch } from './matches';
 import { maybeCompleteTournament } from './completion';
+import { boardSweep } from './boardlife';
 import { notify } from './lib/notify';
 
 export const tick = onSchedule('every 60 minutes', async () => {
@@ -25,6 +26,7 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await autoConfirmScorecards(now);
   await weatherSweep(now);
   await bookingWindowSweep(now);
+  await boardSweep(now);
 });
 
 /**

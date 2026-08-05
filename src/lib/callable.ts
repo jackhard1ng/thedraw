@@ -151,6 +151,12 @@ export const ensureCourse = httpsCallable<
   { created: boolean }
 >(functions, 'ensureCourse');
 
+// ---- Attestation (the §P3 witness — feeds minAttestedRounds eligibility) ---
+export const attestRound = httpsCallable<{ roundId: string }, { ok: boolean }>(
+  functions,
+  'attestRound',
+);
+
 // ---- Spectating / social ----------------------------------------------------
 export const followUser = httpsCallable<{ targetId: string }, { ok: boolean }>(
   functions,

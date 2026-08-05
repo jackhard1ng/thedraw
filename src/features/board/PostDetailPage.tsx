@@ -3,15 +3,102 @@
  * and joinedUserIds stay authoritative and blocks are enforced (§3, §5). Once a
  * player has joined they get the chat thread to coordinate.
  */
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { usePost } from './useRoundPosts';
-import { joinRound, leaveRound } from '@/lib/callable';
+import { attestRound, joinRound, leaveRound } from '@/lib/callable';
+import type { Round } from '@/types/models';
 import { ChatThread } from '@/features/chat/ChatThread';
 import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
 import { Badge, Button, Card, Num, Rule, Spinner } from '@/components/ui';
 import { formatTeeTime, relativeDays } from '@/lib/format';
+
+/**
+ * After the tee time passes, the post completes and this section runs the
+ * attestation funnel (§P3): each player logs a score; a groupmate attests it.
+ * Attested rounds count toward money-event eligibility.
+ */
+function GroupScores({
+  postId,
+  placeId,
+  uid,
+  inGroup,
+}: {
+  postId: string;
+  placeId: string | null;
+  uid: string | undefined;
+  inGroup: boolean;
+}) {
+  const [rounds, setRounds] = useState<(Round & { id: string })[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const q = query(collection(db, 'rounds'), where('roundPostId', '==', postId));
+    return onSnapshot(q, (snap) =>
+      setRounds(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Round) }))),
+    );
+  }, [postId]);
+
+  const mine = rounds.find((r) => r.userId === uid);
+
+  return (
+    <Card className="p-4">
+      <p className="mb-1 font-display uppercase tracking-wide text-sm text-ink">
+        Group scores
+      </p>
+      <p className="mb-3 text-xs text-ink-faint">
+        Attested rounds count toward money-event eligibility — vouch for the
+        scores you watched happen.
+      </p>
+      {rounds.length === 0 && (
+        <p className="text-sm text-ink-faint">No scores logged yet.</p>
+      )}
+      <div className="divide-y divide-rule">
+        {rounds.map((r) => (
+          <div key={r.id} className="flex items-center justify-between py-2 text-sm">
+            <span className="text-ink">
+              <Num className="text-lg">{r.totalScore}</Num>
+              <span className="ml-2 text-ink-faint">({r.holes} holes)</span>
+            </span>
+            {r.source === 'attested' ? (
+              <Badge tone="fresh">Attested</Badge>
+            ) : inGroup && r.userId !== uid ? (
+              <Button
+                variant="ghost"
+                className="px-3 py-1.5 text-xs"
+                onClick={async () => {
+                  setError(null);
+                  try {
+                    await attestRound({ roundId: r.id });
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              >
+                Attest
+              </Button>
+            ) : (
+              <Badge tone="expired">Unattested</Badge>
+            )}
+          </div>
+        ))}
+      </div>
+      {inGroup && !mine && (
+        <Link
+          to={`/rounds/new?postId=${postId}${placeId ? `&placeId=${placeId}` : ''}`}
+          className="mt-3 block"
+        >
+          <Button variant="primary" className="w-full">
+            Log my score
+          </Button>
+        </Link>
+      )}
+      {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+    </Card>
+  );
+}
 
 export function PostDetailPage() {
   const { postId } = useParams();
@@ -120,7 +207,18 @@ export function PostDetailPage() {
         {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
       </Card>
 
-      {(isJoined || isOwner) && (
+      {post.status === 'completed' && (
+        <div className="mt-6">
+          <GroupScores
+            postId={post.id}
+            placeId={post.course.placeId}
+            uid={uid}
+            inGroup={isJoined || isOwner}
+          />
+        </div>
+      )}
+
+      {(isJoined || isOwner) && post.status !== 'completed' && (
         <div className="mt-6">
           <h2 className="mb-2 text-lg">Coordinate</h2>
           <Card className="p-4">

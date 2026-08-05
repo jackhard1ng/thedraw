@@ -62,6 +62,8 @@ export { collectGreenFees, cancelScheduledMatch } from './greenfees';
 
 export { ensureCourse } from './courses';
 
+export { attestRound, onRoundPosted } from './boardlife';
+
 export { createConnectOnboardingLink, createSetupIntent } from './payments';
 
 export { tick } from './scheduled';

@@ -7,7 +7,7 @@
  * in a visually separate section from the verified index and are never blended.
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { addDoc, collection, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -26,6 +26,11 @@ const TEES: [TeePosition, string][] = [
 export function LogRoundPage() {
   const { fbUser } = useAuth();
   const nav = useNavigate();
+  // Arriving from a completed board post ("log your score") links the round to
+  // that post so a groupmate can attest it (the eligibility funnel).
+  const [params] = useSearchParams();
+  const fromPostId = params.get('postId');
+  const fromPlaceId = params.get('placeId');
   const [course, setCourse] = useState<CoursePick | null>(null);
   const [score, setScore] = useState('');
   const [holes, setHoles] = useState<9 | 18>(18);
@@ -35,16 +40,17 @@ export function LogRoundPage() {
   const [error, setError] = useState<string | null>(null);
 
   const scoreNum = Number(score);
-  const valid = !!course && Number.isFinite(scoreNum) && scoreNum > 0;
+  const effectivePlaceId = course?.placeId ?? fromPlaceId;
+  const valid = !!effectivePlaceId && Number.isFinite(scoreNum) && scoreNum > 0;
 
   async function submit() {
-    if (!fbUser || !course || !valid) return;
+    if (!fbUser || !effectivePlaceId || !valid) return;
     setBusy(true);
     setError(null);
     try {
       await addDoc(collection(db, 'rounds'), {
         userId: fbUser.uid,
-        placeId: course.placeId,
+        placeId: effectivePlaceId,
         playedAt: playedAt
           ? Timestamp.fromDate(new Date(playedAt))
           : Timestamp.now(),
@@ -55,9 +61,9 @@ export function LogRoundPage() {
         yardage: null,
         source: 'selfReported',
         attestedBy: null,
-        roundPostId: null,
+        roundPostId: fromPostId ?? null,
       });
-      nav('/me');
+      nav(fromPostId ? `/post/${fromPostId}` : '/me');
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
