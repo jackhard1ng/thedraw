@@ -24,7 +24,45 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await autoConfirmResults(now);
   await autoConfirmScorecards(now);
   await weatherSweep(now);
+  await bookingWindowSweep(now);
 });
+
+/**
+ * Booking-window notifications (§5): for supported courses, compute when
+ * booking opens for a match's agreed date and tell both sides proactively.
+ * This turns a nag into genuine utility — the reason to open the app Tuesday.
+ */
+async function bookingWindowSweep(now: number) {
+  const scheduled = await db
+    .collection('matches')
+    .where('status', '==', 'scheduled')
+    .where('scheduling.agreedTime', '>', Timestamp.fromMillis(now))
+    .get();
+  for (const d of scheduled.docs) {
+    const m = d.data() as any;
+    if (m.bookingNoticeSent || !m.scheduling?.placeId) continue;
+    const course = (await db.doc(`courses/${m.scheduling.placeId}`).get()).data() as any;
+    if (course?.tier !== 'supported' || !course.bookingWindowDays) continue;
+    const teeMs = (m.scheduling.agreedTime as Timestamp).toMillis();
+    const opensMs = teeMs - course.bookingWindowDays * 86_400_000;
+    // Fire within the hour that the window opens (job runs hourly).
+    if (opensMs > now || opensMs < now - 2 * 3_600_000) continue;
+    for (const entryId of m.entryIds as string[]) {
+      if (!entryId) continue;
+      const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+      for (const u of e?.userIds ?? []) {
+        await notify({
+          userId: u,
+          title: `${course.name} booking is open`,
+          body: `Booking just opened for your match date${course.bookingOpensAtLocal ? ` (opens ${course.bookingOpensAtLocal} local)` : ''}. Grab the tee time.`,
+          deadlineCritical: true,
+          link: `/matches/${d.id}`,
+        });
+      }
+    }
+    await d.ref.update({ bookingNoticeSent: true });
+  }
+}
 
 async function closeDueTournaments(now: number) {
   const due = await db.collection('tournaments').where('status', '==', 'open').where('registrationCloses', '<=', Timestamp.fromMillis(now)).get();

@@ -9,6 +9,7 @@
  * carries no maps dependency.
  */
 import { useEffect, useRef, useState } from 'react';
+import { ensureCourse } from '@/lib/callable';
 
 export interface CoursePick {
   placeId: string;
@@ -125,12 +126,16 @@ export function PlacesAutocomplete({
       },
       (place) => {
         const loc = place?.geometry?.location;
-        onSelect({
+        const pick = {
           placeId: pred.place_id,
           name: place?.name ?? pred.description,
           address: place?.formatted_address ?? '',
           location: loc ? { lat: loc.lat(), lng: loc.lng() } : null,
-        });
+        };
+        onSelect(pick);
+        // Upsert the listed course doc (fire-and-forget) — the only write path
+        // for `courses`, and what feeds weather + booking-window automation.
+        ensureCourse(pick).catch(() => undefined);
       },
     );
   }

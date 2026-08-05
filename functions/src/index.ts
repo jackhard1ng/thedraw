@@ -58,6 +58,10 @@ export { createInstantEvent } from './instant';
 
 export { createTourSeries, createTourStop } from './tour';
 
+export { collectGreenFees, cancelScheduledMatch } from './greenfees';
+
+export { ensureCourse } from './courses';
+
 export { createConnectOnboardingLink, createSetupIntent } from './payments';
 
 export { tick } from './scheduled';

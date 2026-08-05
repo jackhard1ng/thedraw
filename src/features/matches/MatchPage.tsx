@@ -36,6 +36,7 @@ import {
   submitResult,
   confirmResult,
   disputeResult,
+  cancelScheduledMatch,
 } from '@/lib/callable';
 import {
   bracketSize,
@@ -483,6 +484,26 @@ export function MatchPage() {
                   Report the result
                 </p>
                 <ResultForm matchId={match.id} entries={twoEntries} nameOf={entryName} onError={setError} />
+                {/* The published cancellation ladder (§5) — deterministic. */}
+                <button
+                  className="w-full py-2 text-center text-xs text-ink-faint underline underline-offset-2 hover:text-tournament"
+                  onClick={async () => {
+                    if (
+                      !window.confirm(
+                        'Cancel this tee time?\n\n· More than 72h out: full refund, back to scheduling (one free per season)\n· 24–72h out: refund only if the slot re-fills\n· Under 24h: no refund — the match is forfeited',
+                      )
+                    )
+                      return;
+                    setError(null);
+                    try {
+                      await cancelScheduledMatch({ matchId: match.id });
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  Need to cancel?
+                </button>
               </>
             )}
           </div>

@@ -130,6 +130,27 @@ export const confirmRoundScore = httpsCallable<
   { ok: boolean }
 >(functions, 'confirmRoundScore');
 
+// ---- Green fees + cancellation ladder (§5 — never player-to-player debt) ---
+export const collectGreenFees = httpsCallable<
+  { matchId: string; perPlayerCents: number },
+  { ok: boolean; charged: number }
+>(functions, 'collectGreenFees');
+export const cancelScheduledMatch = httpsCallable<
+  { matchId: string },
+  { ok: boolean; outcome: 'rescheduled' | 'refundPending' | 'forfeited' }
+>(functions, 'cancelScheduledMatch');
+
+// ---- Courses: upsert a listed course from a Places pick (only write path) --
+export const ensureCourse = httpsCallable<
+  {
+    placeId: string;
+    name: string;
+    address: string;
+    location: { lat: number; lng: number } | null;
+  },
+  { created: boolean }
+>(functions, 'ensureCourse');
+
 // ---- Spectating / social ----------------------------------------------------
 export const followUser = httpsCallable<{ targetId: string }, { ok: boolean }>(
   functions,

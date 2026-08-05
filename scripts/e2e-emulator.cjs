@@ -298,6 +298,38 @@ async function main() {
   } catch { badShape = true; }
   check('disallowed payout shape rejected', badShape);
 
+  // ================= FLOW D — cancellation ladder (§5, deterministic) ========
+  console.log('\nFLOW D — cancellation ladder');
+  const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {
+    await db.doc(`entries/${eA}`).set({ tournamentId: 'ladder', userIds: [uA], teamId: null, teamName: null, captainId: uA, combinedIndex: 8, flight: null, seed: 1, paymentIntentId: null, paymentStatus: 'captured', status: 'active' });
+    await db.doc(`entries/${eB}`).set({ tournamentId: 'ladder', userIds: [uB], teamId: null, teamName: null, captainId: uB, combinedIndex: 9, flight: null, seed: 2, paymentIntentId: null, paymentStatus: 'captured', status: 'active' });
+    await db.doc(`matches/${mid}`).set({
+      tournamentId: 'ladder', round: 1, entryIds: [eA, eB],
+      scheduling: { deadline: null, availabilityLog: [], extensionsUsed: {}, agreedTime: Timestamp.fromMillis(Date.now() + hoursOut * 3600000), placeId: null, bookedBy: uA },
+      result: { submittedBy: null, submittedAt: null, winnerEntryId: null, margin: null, holes: null, confirmedBy: null, confirmedAt: null, disputed: false, scorecardPhotoUrl: null },
+      status: 'scheduled', forfeitedBy: null, forfeitReason: null,
+    });
+  };
+  await db.doc('tournaments/ladder').set({ marketId: 'kc', formatId: 'singlesMatch', createdBy: 'org1', name: 'Ladder', structure: 'bracket', status: 'inProgress', bracketRounds: 9, entryFeeCents: 0, prizeType: 'cashPurse', entryIds: [] });
+
+  // >72h out → back to scheduling, one free reschedule per season
+  await mkSched('lad_r1_m0', 'ladA', 'ladB', 'p1', 'p2', 100);
+  const r1 = await call(fns.cancelScheduledMatch, 'p1', { matchId: 'lad_r1_m0' });
+  check('>72h cancel → rescheduled', r1.outcome === 'rescheduled', r1);
+  check('match back to scheduling', (await db.doc('matches/lad_r1_m0').get()).data().status === 'scheduling');
+  // second free reschedule denied
+  await db.doc('matches/lad_r1_m0').update({ status: 'scheduled', 'scheduling.agreedTime': Timestamp.fromMillis(Date.now() + 100 * 3600000) });
+  let secondFree = false;
+  try { await call(fns.cancelScheduledMatch, 'p1', { matchId: 'lad_r1_m0' }); } catch { secondFree = true; }
+  check('second free reschedule denied', secondFree);
+
+  // <24h out → forfeit by the canceller
+  await mkSched('lad_r1_m1', 'ladC', 'ladD', 'p3', 'p4', 10);
+  const r2 = await call(fns.cancelScheduledMatch, 'p3', { matchId: 'lad_r1_m1' });
+  check('<24h cancel → forfeited', r2.outcome === 'forfeited', r2);
+  const fm = (await db.doc('matches/lad_r1_m1').get()).data();
+  check('forfeit charged to canceller, opponent advances', fm.forfeitedBy === 'ladC' && fm.result.winnerEntryId === 'ladD', { f: fm.forfeitedBy, w: fm.result.winnerEntryId });
+
   console.log(`\n========== ${pass} passed, ${fail} failed ==========`);
   process.exit(fail ? 1 : 0);
 }
