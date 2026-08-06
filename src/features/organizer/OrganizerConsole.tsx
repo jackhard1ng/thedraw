@@ -21,6 +21,7 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Badge, Card, Num, SectionHeader, Spinner } from '@/components/ui';
+import { CourseDataPanel } from './CourseDataPanel';
 import { relativeDays } from '@/lib/format';
 import { useTournaments } from '@/features/tournaments/useTournaments';
 import type { Match, Report } from '@/types/models';
@@ -182,6 +183,9 @@ export function OrganizerConsole() {
           </div>
         )}
       </div>
+
+      {/* Course data entry — the promotion queue (§4 tiers) */}
+      <CourseDataPanel />
     </div>
   );
 }

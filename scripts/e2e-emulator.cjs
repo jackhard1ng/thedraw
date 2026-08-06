@@ -451,6 +451,39 @@ async function main() {
   const gsc = (await db.doc('scorecards/grossRules1_g1_1').get()).data();
   check('gross format: no strokes even at a rated course', gsc.courseHandicap === null);
 
+  // ================= FLOW H — course data entry + promotion ==================
+  console.log('\nFLOW H — course data entry (listed → supported)');
+  await db.doc('courses/promoteMe').set({
+    placeId: 'promoteMe', marketId: 'kc', name: 'Promote CC', address: '', location: null,
+    tier: 'listed', accessType: 'public', guestPolicy: null, bookingPlatform: null,
+    bookingUrl: null, bookingWindowDays: null, bookingOpensAtLocal: null,
+    holeHandicapOrder: null, holePars: null, teeSets: null, roundCount: 5,
+  });
+  // member cannot enter course data
+  let memberBlocked = false;
+  try {
+    await call(fns.updateCourseData, 'p1', { placeId: 'promoteMe', teeSets: [{ name: 'Blue', yardage: 6400, rating: 71.2, slope: 126, par: 71 }] });
+  } catch { memberBlocked = true; }
+  check('member cannot enter course data', memberBlocked);
+  // bad stroke index rejected
+  let badIndex = false;
+  try {
+    await call(fns.updateCourseData, 'org1', { placeId: 'promoteMe', holeHandicapOrder: Array(18).fill(1) });
+  } catch { badIndex = true; }
+  check('invalid stroke index rejected', badIndex);
+  // full data promotes
+  const promo = await call(fns.updateCourseData, 'org1', {
+    placeId: 'promoteMe',
+    teeSets: [
+      { name: 'Blue', yardage: 6400, rating: 71.2, slope: 126, par: 71 },
+      { name: 'White', yardage: 5900, rating: 68.9, slope: 118, par: 71 },
+    ],
+    holeHandicapOrder: [7,1,13,5,17,9,3,15,11,2,14,6,18,10,4,16,12,8],
+  });
+  check('full data promotes to supported', promo.promoted === true);
+  const promoted = (await db.doc('courses/promoteMe').get()).data();
+  check('tier is supported with 2 tee sets', promoted.tier === 'supported' && promoted.teeSets.length === 2);
+
   console.log(`\n========== ${pass} passed, ${fail} failed ==========`);
   process.exit(fail ? 1 : 0);
 }

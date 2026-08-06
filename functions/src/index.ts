@@ -60,7 +60,7 @@ export { createTourSeries, createTourStop } from './tour';
 
 export { collectGreenFees, cancelScheduledMatch } from './greenfees';
 
-export { ensureCourse } from './courses';
+export { ensureCourse, updateCourseData } from './courses';
 
 export { attestRound, onRoundPosted } from './boardlife';
 

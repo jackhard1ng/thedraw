@@ -167,6 +167,22 @@ export const attestRound = httpsCallable<{ roundId: string }, { ok: boolean }>(
   'attestRound',
 );
 
+// ---- Course data entry (organizer) — promotes listed → supported (§4) ------
+export const updateCourseData = httpsCallable<
+  {
+    placeId: string;
+    teeSets?: { name: string; yardage: number; rating: number; slope: number; par: number }[];
+    holeHandicapOrder?: number[];
+    holePars?: number[];
+    accessType?: 'public' | 'dailyFee' | 'semiPrivate' | 'private';
+    bookingPlatform?: string | null;
+    bookingUrl?: string | null;
+    bookingWindowDays?: number | null;
+    bookingOpensAtLocal?: string | null;
+  },
+  { ok: boolean; promoted: boolean }
+>(functions, 'updateCourseData');
+
 // ---- Spectating / social ----------------------------------------------------
 export const followUser = httpsCallable<{ targetId: string }, { ok: boolean }>(
   functions,

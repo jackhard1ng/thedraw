@@ -11,6 +11,7 @@ export interface PreMatchCard {
   indexes: string; // "You: 12.4   Kevin: 7.1"
   strokes: string; // "You get 5 strokes."
   strokeHoles: string | null; // where they fall, if the course card is known
+  teeAlternative: string | null; // level the match by tees instead of strokes
   primer: string; // the match-play, quickly paragraph
 }
 
@@ -42,6 +43,8 @@ export function preMatchCard(args: {
   oppIndex: number;
   courseName: string | null;
   holeHandicapOrder: number[] | null;
+  /** Rated tee sets at the course, when known — enables the tee alternative. */
+  teeSets?: { name: string; rating: number }[] | null;
 }): PreMatchCard {
   const {
     entriesRemaining,
@@ -51,6 +54,7 @@ export function preMatchCard(args: {
     oppIndex,
     courseName,
     holeHandicapOrder,
+    teeSets,
   } = args;
 
   const youGets = youIndex >= oppIndex;
@@ -79,11 +83,38 @@ export function preMatchCard(args: {
     }
   }
 
+  // The different-tees alternative (WHS mechanism): the rating gap between two
+  // tee sets IS an equalizer. If a pair of tees at this course absorbs most of
+  // the stroke difference, offer it — the weaker player moves up instead.
+  let teeAlternative: string | null = null;
+  if (strokes >= 2 && teeSets && teeSets.length >= 2) {
+    const sorted = [...teeSets].sort((a, b) => b.rating - a.rating);
+    let best: { back: string; fwd: string; covered: number } | null = null;
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const covered = Math.round(sorted[i].rating - sorted[j].rating);
+        if (covered < 1 || covered > strokes) continue;
+        if (!best || covered > best.covered) {
+          best = { back: sorted[i].name, fwd: sorted[j].name, covered };
+        }
+      }
+    }
+    if (best) {
+      const leftover = strokes - best.covered;
+      const receiver = youGets ? 'you' : oppName;
+      teeAlternative =
+        `Or level it by tees: ${receiver} play${youGets ? '' : 's'} the ${best.fwd} tees while the other plays the ${best.back}` +
+        ` — that covers ${best.covered} of the ${strokes} strokes` +
+        (leftover > 0 ? `, with ${leftover} still taken on the hardest hole${leftover === 1 ? '' : 's'}.` : ' — dead even, no strokes.');
+    }
+  }
+
   return {
     heading: `${roundLabel(entriesRemaining)} · ${youName} vs. ${oppName}`,
     indexes: `You: ${youIndex.toFixed(1)}   ${oppName}: ${oppIndex.toFixed(1)}`,
     strokes: strokesLine,
     strokeHoles,
+    teeAlternative,
     primer:
       'Match play, quickly: hole by hole, not total score. Low score wins the ' +
       'hole, ties are halved. Pick up when you can’t win a hole. "3&2" = up ' +

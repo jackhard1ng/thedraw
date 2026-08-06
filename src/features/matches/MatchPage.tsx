@@ -316,6 +316,7 @@ export function MatchPage() {
     oppIndex: opp.index,
     courseName: course?.name ?? null,
     holeHandicapOrder: course?.holeHandicapOrder ?? null,
+    teeSets: course?.teeSets ?? null,
   });
 
   const log = match.scheduling.availabilityLog;
@@ -367,6 +368,11 @@ export function MatchPage() {
         </p>
         <p className="mt-2 text-ink">{card.strokes}</p>
         {card.strokeHoles && <p className="mt-1 text-sm text-ink-soft">{card.strokeHoles}</p>}
+        {card.teeAlternative && (
+          <p className="mt-2 rounded-md border border-pine/40 bg-pine/10 p-2.5 text-sm text-ink-soft">
+            {card.teeAlternative} Agree it in chat before you tee off.
+          </p>
+        )}
         <Rule className="my-3" />
         <p className="text-sm text-ink-soft">{card.primer}</p>
       </Card>
