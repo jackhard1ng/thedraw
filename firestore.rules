@@ -171,6 +171,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if false;
     }
+    // Enter-the-Draw requests: created/withdrawn via callables; a user reads
+    // their own, and open-count aggregation is read via the same rule.
+    match /playRequests/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /eventRequests/{id} {
       allow read: if isActive();
       allow create: if isActive() && request.resource.data.requestedBy == request.auth.uid;

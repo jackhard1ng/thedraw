@@ -64,6 +64,8 @@ export { ensureCourse } from './courses';
 
 export { attestRound, onRoundPosted } from './boardlife';
 
+export { enterDraw, leaveDraw } from './draw';
+
 export { createConnectOnboardingLink, createSetupIntent } from './payments';
 
 export { tick } from './scheduled';

@@ -474,6 +474,23 @@ export interface ReputationEvent {
 }
 
 // ---------------------------------------------------------------------------
+// playRequests/{id} — Enter the Draw. One tap in; the hourly sweep groups
+// compatible entrants and creates a full round post with a designated booker.
+// ---------------------------------------------------------------------------
+export interface PlayRequest {
+  marketId: string;
+  userId: string;
+  displayName: string;
+  index: number; // frozen at entry
+  day: string; // "saturday"
+  willingToBook: boolean;
+  status: 'open' | 'matched' | 'withdrawn' | 'expired';
+  postId?: string;
+  createdAt: Ts;
+  expiresAt: Ts;
+}
+
+// ---------------------------------------------------------------------------
 // Moderation (Phase 1, non-deferrable — §5 Safety)
 // ---------------------------------------------------------------------------
 export interface Block {

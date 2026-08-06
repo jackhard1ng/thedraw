@@ -151,6 +151,16 @@ export const ensureCourse = httpsCallable<
   { created: boolean }
 >(functions, 'ensureCourse');
 
+// ---- Enter the Draw — one-tap matching into a group with a named booker ----
+export const enterDraw = httpsCallable<
+  { day: string; willingToBook?: boolean },
+  { requestId: string; alreadyIn: boolean }
+>(functions, 'enterDraw');
+export const leaveDraw = httpsCallable<{ day: string }, { ok: boolean }>(
+  functions,
+  'leaveDraw',
+);
+
 // ---- Attestation (the §P3 witness — feeds minAttestedRounds eligibility) ---
 export const attestRound = httpsCallable<{ roundId: string }, { ok: boolean }>(
   functions,

@@ -19,6 +19,7 @@ const admin = require(path + '/node_modules/firebase-admin');
 const fns = require(path + '/lib/index.js');
 const { maybeCompleteTournament } = require(path + '/lib/completion.js');
 const { boardSweep } = require(path + '/lib/boardlife.js');
+const { drawSweep } = require(path + '/lib/draw.js');
 
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
@@ -375,6 +376,40 @@ async function main() {
   check('groupmate attest → source attested', attested.source === 'attested' && attested.attestedBy === 'p1');
   const playedRep = await db.collection('reputationEvents').where('userId', '==', 'p2').where('type', '==', 'played').get();
   check('played reputation written on attest', playedRep.size >= 1);
+
+  // ================= FLOW F — Enter the Draw ================================
+  console.log('\nFLOW F — Enter the Draw');
+  // p5 is a 25-index outlier who must NOT be grouped with the 4-12 band.
+  await makeUser('p5', 'Ruiz, T.', 25.0);
+  // p1(7.1) p2(12.4) p3(15.8) p4(4.2): sorted 4.2,7.1,12.4,15.8 spread 11.6 > 8
+  // → the greedy matcher should form a compatible smaller group instead.
+  await call(fns.enterDraw, 'p4', { day: 'saturday' }); // 4.2, first in → booker
+  await call(fns.enterDraw, 'p1', { day: 'saturday' }); // 7.1
+  await call(fns.enterDraw, 'p2', { day: 'saturday', willingToBook: false }); // 12.4
+  await call(fns.enterDraw, 'p5', { day: 'saturday', willingToBook: false }); // 25.0 outlier
+  const dup2 = await call(fns.enterDraw, 'p4', { day: 'saturday' });
+  check('re-entering is idempotent', dup2.alreadyIn === true);
+
+  await drawSweep(Date.now());
+
+  // Band math: 12.4 - 4.2 = 8.2 > 8, so p2 is (correctly) outside the band —
+  // the matcher forms a two-ball (4.2, 7.1) rather than stretching the spread.
+  const matched = await db.collection('playRequests').where('status', '==', 'matched').get();
+  const matchedUsers = matched.docs.map((d) => d.data().userId).sort();
+  check('band respected: only 4.2 + 7.1 grouped', matchedUsers.join(',') === 'p1,p4', matchedUsers);
+  const stillOpen = await db.collection('playRequests').where('status', '==', 'open').get();
+  const openUsers = stillOpen.docs.map((d) => d.data().userId);
+  check('out-of-band players wait for the next draw', openUsers.includes('p5') && openUsers.includes('p2'), openUsers);
+
+  const drawPosts = await db.collection('roundPosts').where('drawMatched', '==', true).get();
+  check('draw created one group post', drawPosts.size === 1);
+  if (drawPosts.size === 1) {
+    const p = drawPosts.docs[0].data();
+    check('post is full with named booker as creator', p.status === 'full' && p.createdBy === 'p4', { createdBy: p.createdBy, status: p.status });
+    check('booker is willing + earliest (p2 unwilling was not chosen)', p.createdBy !== 'p2');
+    check('others joined', p.joinedUserIds.length === 1 && p.slotsFilled === 2);
+    check('handicap range recorded', Array.isArray(p.handicapRange) && p.handicapRange[0] === 4.2);
+  }
 
   console.log(`\n========== ${pass} passed, ${fail} failed ==========`);
   process.exit(fail ? 1 : 0);

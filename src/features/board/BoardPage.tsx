@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useBlockedIds } from '@/features/moderation/useBlocks';
 import { Button, Spinner } from '@/components/ui';
 import { RoundPostCard } from './RoundPostCard';
+import { DrawCard } from './DrawCard';
 import {
   applyFilters,
   DEFAULT_FILTERS,
@@ -59,10 +60,9 @@ export function BoardPage() {
     <div className="mx-auto max-w-sheet px-4 pb-28 pt-4">
       <div className="mb-4 flex items-baseline justify-between">
         <h1 className="text-2xl">The Board</h1>
-        <span className="text-xs uppercase tracking-widest text-ink-faint">
-          Kansas City
-        </span>
       </div>
+
+      <DrawCard />
 
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
         <FilterChip
