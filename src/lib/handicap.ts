@@ -62,25 +62,31 @@ export function courseHandicap(
 }
 
 /**
- * Strokes given in a singles match = the difference of the two indexes,
- * allocated to the hardest holes off the scorecard's stroke index. Match play
- * needs no rating/slope — only the hole handicap order (§4).
+ * Strokes given in a singles match = the difference of the two indexes
+ * (rounded), allocated to the hardest holes off the scorecard's stroke index.
+ * Match play needs no rating/slope — only the hole handicap order (§4).
+ *
+ * 19+ strokes (rare, open brackets only): one stroke on EVERY hole per full 18,
+ * plus the remainder on the hardest holes — `perHoleBase` carries the everywhere
+ * strokes and `holes` the remainder allocation.
  */
 export function matchStrokeHoles(
   higherIndex: number,
   lowerIndex: number,
   holeHandicapOrder: number[] | null,
-): { strokes: number; holes: number[] } {
+): { strokes: number; holes: number[]; perHoleBase: number } {
   const strokes = Math.max(0, Math.round(higherIndex - lowerIndex));
+  const perHoleBase = Math.floor(strokes / 18);
+  const remainder = strokes % 18;
   if (!holeHandicapOrder || holeHandicapOrder.length !== 18) {
-    return { strokes, holes: [] };
+    return { strokes, holes: [], perHoleBase };
   }
   // holeHandicapOrder[i] is the stroke index (1 = hardest) for hole i+1.
   const ranked = holeHandicapOrder
     .map((si, i) => ({ hole: i + 1, si }))
     .sort((a, b) => a.si - b.si);
-  const holes = ranked.slice(0, strokes).map((h) => h.hole).sort((a, b) => a - b);
-  return { strokes, holes };
+  const holes = ranked.slice(0, remainder).map((h) => h.hole).sort((a, b) => a - b);
+  return { strokes, holes, perHoleBase };
 }
 
 /** Whether this course can host a net event at all (§4). */

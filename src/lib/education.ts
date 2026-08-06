@@ -56,7 +56,7 @@ export function preMatchCard(args: {
   const youGets = youIndex >= oppIndex;
   const high = Math.max(youIndex, oppIndex);
   const low = Math.min(youIndex, oppIndex);
-  const { strokes, holes } = matchStrokeHoles(high, low, holeHandicapOrder);
+  const { strokes, holes, perHoleBase } = matchStrokeHoles(high, low, holeHandicapOrder);
 
   const strokesLine =
     strokes === 0
@@ -65,12 +65,19 @@ export function preMatchCard(args: {
         ? `You get ${strokes} stroke${strokes === 1 ? '' : 's'}.`
         : `${oppName} gets ${strokes} stroke${strokes === 1 ? '' : 's'}.`;
 
-  const strokeHoles =
-    holes.length && courseName
-      ? `At ${courseName} those fall on holes ${holes.join(', ')} — the ${
-          holes.length
-        } hardest on the card.`
-      : null;
+  // Where the strokes fall: named holes when we have the course card; the
+  // printed scorecard's handicap row otherwise — never left unstated.
+  let strokeHoles: string | null = null;
+  if (strokes > 0) {
+    if (perHoleBase > 0 && holes.length && courseName) {
+      strokeHoles = `A stroke on every hole, plus another on holes ${holes.join(', ')} — the ${holes.length} hardest at ${courseName}.`;
+    } else if (holes.length && courseName) {
+      strokeHoles = `At ${courseName} those fall on holes ${holes.join(', ')} — the ${holes.length} hardest on the card.`;
+    } else {
+      strokeHoles =
+        'Take them on the lowest-numbered holes in the HANDICAP row of the course scorecard — 1 is the hardest.';
+    }
+  }
 
   return {
     heading: `${roundLabel(entriesRemaining)} · ${youName} vs. ${oppName}`,
