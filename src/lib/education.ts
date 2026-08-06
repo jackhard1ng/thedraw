@@ -84,6 +84,32 @@ export function preMatchCard(args: {
   };
 }
 
+/**
+ * The stroke rule, stated in plain language for the registration page (§5 —
+ * format explained BEFORE payment). One sentence, no jargon left undefined.
+ */
+export function strokesRule(format: {
+  scoring: string;
+  handicapAllowance: Record<string, number> | { type?: string; percent?: number; low?: number; high?: number } | null;
+}): string {
+  const a = format.handicapAllowance as
+    | { type?: string; percent?: number; low?: number; high?: number }
+    | null;
+  if (format.scoring === 'matchPlay') {
+    return 'Strokes: the difference between your two indexes, taken on the hardest holes on the card. Equal indexes = scratch match, no strokes.';
+  }
+  if (!a) {
+    return 'No strokes — everyone plays straight up. Your gross score is your score.';
+  }
+  if (typeof a.percent === 'number') {
+    return `Net event: you play off ${Math.round(a.percent * 100)}% of your course handicap at the designated course, frozen when the draw is made.`;
+  }
+  if (typeof a.low === 'number' && typeof a.high === 'number') {
+    return `Team allowance: ${Math.round(a.low * 100)}% of the lower index plus ${Math.round(a.high * 100)}% of the higher — your team plays off the combined number.`;
+  }
+  return 'Stroke allocation is shown on your scorecard before the round.';
+}
+
 /** One-sentence glossary — tapping any term returns this inline. No manual (§5). */
 export const GLOSSARY: Record<string, string> = {
   '3&2': 'You were 3 holes up with only 2 left to play, so the match ended early.',

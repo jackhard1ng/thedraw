@@ -277,10 +277,15 @@ export const submitRoundScore = onCall<{
   const entryId = entry.docs[0].id;
   const id = `${tournamentId}_${entryId}_${round}`;
   const ref = db.doc(`scorecards/${id}`);
-  if (!(await ref.get()).exists) throw new HttpsError('not-found', 'No scorecard for that round.');
+  const cardSnap = await ref.get();
+  if (!cardSnap.exists) throw new HttpsError('not-found', 'No scorecard for that round.');
   if (!Number.isInteger(gross) || gross <= 0) throw new HttpsError('invalid-argument', 'Enter a valid gross score.');
+  // Net = gross − the playing handicap FROZEN at draw time. Null handicap
+  // (gross format, or a course without tee data) means this card is gross-only.
+  const frozenCh = (cardSnap.data() as { courseHandicap: number | null }).courseHandicap;
   await ref.update({
     gross,
+    net: frozenCh != null ? gross - frozenCh : null,
     submittedBy: uid,
     scorecardPhotoUrl: req.data.scorecardPhotoUrl ?? null,
     confirmDeadline: Timestamp.fromMillis(Date.now() + RESULT_CONFIRM_HOURS * 3_600_000),

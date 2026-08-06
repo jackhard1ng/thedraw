@@ -119,16 +119,53 @@ export async function createPodMatches(tid: string, pods: string[][]) {
   await batch.commit();
 }
 
-/** Stroke-play scorecards: one per entry per round, awaiting the player's score. */
+/**
+ * Stroke-play scorecards: one per entry per round, awaiting the player's score.
+ *
+ * The stroke rule is FROZEN here, at draw time (§4): for a net-scored format,
+ * each card gets a playing handicap computed from the entry's frozen index and
+ * the DESIGNATED course's tee data —
+ *
+ *   Course Handicap = Index × Slope/113 + (Rating − Par)
+ *   Playing Handicap = round(Course Handicap × allowance)   (e.g. 95%)
+ *
+ * A gross format (allowance null) freezes courseHandicap at null — no strokes,
+ * ever, and the UI states it. Net requires a supported course with tee data;
+ * a listed course leaves courseHandicap null and that card scores gross-only.
+ */
 export async function createScorecards(
   tid: string,
-  entries: { id: string; userIds: string[] }[],
+  entries: { id: string; userIds: string[]; combinedIndex: number }[],
   rounds: number,
   designatedCourses: string[],
+  allowancePercent: number | null, // null = gross, no strokes
 ) {
+  // Resolve tee data per designated course once.
+  const teeByRound: ({ slope: number; rating: number; par: number } | null)[] = [];
+  for (let r = 1; r <= rounds; r++) {
+    const placeId = designatedCourses[r - 1];
+    let tee: { slope: number; rating: number; par: number } | null = null;
+    if (placeId && allowancePercent != null) {
+      const course = (await db.doc(`courses/${placeId}`).get()).data() as
+        | { tier: string; teeSets: { slope: number; rating: number; par: number }[] | null }
+        | undefined;
+      if (course?.tier === 'supported' && course.teeSets?.length) {
+        tee = course.teeSets[0];
+      }
+    }
+    teeByRound.push(tee);
+  }
+
   const batch = db.batch();
   for (const e of entries) {
     for (let r = 1; r <= rounds; r++) {
+      const tee = teeByRound[r - 1];
+      const courseHandicap =
+        tee && allowancePercent != null
+          ? Math.round(
+              (e.combinedIndex * (tee.slope / 113) + (tee.rating - tee.par)) * allowancePercent,
+            )
+          : null;
       const id = `${tid}_${e.id}_${r}`;
       batch.set(db.doc(`scorecards/${id}`), {
         tournamentId: tid,
@@ -137,8 +174,8 @@ export async function createScorecards(
         round: r,
         placeId: designatedCourses[r - 1] ?? '',
         gross: 0,
-        courseHandicap: null,
-        net: null,
+        courseHandicap, // frozen now — never recomputed (§4)
+        net: null, // gross − courseHandicap, filled on submission
         holes: null,
         submittedBy: null,
         confirmedBy: null,

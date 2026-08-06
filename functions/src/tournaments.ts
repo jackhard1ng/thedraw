@@ -412,9 +412,21 @@ export async function runClose(tournamentId: string) {
     const pods = makePods(entriesBySeed);
     await createPodMatches(tournamentId, pods);
   } else {
-    // Stroke play (gross foursome, multi-round) — scorecards, no matches.
+    // Stroke play (gross foursome, multi-round) — scorecards, no matches. The
+    // stroke rule freezes here: gross formats get no strokes; net formats get
+    // a playing handicap from the designated course's tee data × allowance.
     const rounds = format?.rounds ?? 1;
-    await createScorecards(tournamentId, entries.map((e) => ({ id: e.id, userIds: e.userIds })), rounds, format?.designatedCourses ?? []);
+    const allowancePercent =
+      format?.handicapAllowance && typeof format.handicapAllowance.percent === 'number'
+        ? format.handicapAllowance.percent
+        : null;
+    await createScorecards(
+      tournamentId,
+      entries.map((e) => ({ id: e.id, userIds: e.userIds, combinedIndex: e.combinedIndex })),
+      rounds,
+      format?.designatedCourses ?? [],
+      allowancePercent,
+    );
   }
 
   await tRef.update({ status: 'inProgress', bracketRounds });

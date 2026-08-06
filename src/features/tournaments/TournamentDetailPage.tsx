@@ -27,7 +27,7 @@ import {
 } from '@/components/ui';
 import { formatCents, itemizeEntry } from '@/lib/money';
 import { relativeDays, formatTeeTime } from '@/lib/format';
-import { GLOSSARY } from '@/lib/education';
+import { GLOSSARY, strokesRule } from '@/lib/education';
 import {
   checkEligibility,
   type DerivedStats,
@@ -52,7 +52,14 @@ const SCORING_BLURB: Record<Scoring, string> = {
 };
 
 /** Format explanation with the load-bearing words made tappable (§5). */
-function FormatExplainer({ format }: { format: Format }) {
+function FormatExplainer({
+  format,
+  indexRange,
+}: {
+  format: Format;
+  indexRange: [number, number] | null;
+}) {
+  const gross = format.scoring !== 'matchPlay' && !format.handicapAllowance;
   return (
     <div className="space-y-2 text-sm text-ink-soft">
       <p>
@@ -67,6 +74,29 @@ function FormatExplainer({ format }: { format: Format }) {
         )}
       </p>
       <p>{SCORING_BLURB[format.scoring]}</p>
+
+      {/* The stroke rule, stated before anyone pays — never buried (§5). */}
+      <p
+        className={`rounded-md border p-2.5 ${
+          gross
+            ? 'border-tournament/30 bg-tournament/5 text-ink'
+            : 'border-rule bg-paper-sunken text-ink'
+        }`}
+      >
+        <span className="mr-1.5 font-display uppercase tracking-wide text-xs text-ink-soft">
+          {gross ? 'Gross' : 'Strokes'}
+        </span>
+        {strokesRule(format)}
+      </p>
+      {indexRange && (
+        <p className="text-xs text-ink-soft">
+          Open to indexes{' '}
+          <span className="tnum">
+            {indexRange[0].toFixed(1)}–{indexRange[1] >= 40 ? 'up' : indexRange[1].toFixed(1)}
+          </span>{' '}
+          — enforced at entry, frozen when the draw is made.
+        </p>
+      )}
       <p className="flex flex-wrap gap-x-3 gap-y-1">
         {format.scoring === 'matchPlay' && (
           <Term word="match play" def={GLOSSARY['match play']} />
@@ -249,7 +279,7 @@ export function TournamentDetailPage() {
       <div className="mt-6">
         <SectionHeader>Format</SectionHeader>
         {format ? (
-          <FormatExplainer format={format} />
+          <FormatExplainer format={format} indexRange={tournament.eligibility.indexRange} />
         ) : (
           <p className="text-sm text-ink-faint">Loading format…</p>
         )}

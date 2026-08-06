@@ -20,6 +20,7 @@ const fns = require(path + '/lib/index.js');
 const { maybeCompleteTournament } = require(path + '/lib/completion.js');
 const { boardSweep } = require(path + '/lib/boardlife.js');
 const { drawSweep } = require(path + '/lib/draw.js');
+const { createScorecards } = require(path + '/lib/lib/matchgen.js');
 
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
@@ -410,6 +411,45 @@ async function main() {
     check('others joined', p.joinedUserIds.length === 1 && p.slotsFilled === 2);
     check('handicap range recorded', Array.isArray(p.handicapRange) && p.handicapRange[0] === 4.2);
   }
+
+  // ================= FLOW G — stroke rules: frozen handicap + net ============
+  console.log('\nFLOW G — stroke rules (gross vs net, frozen at draw)');
+  // Supported course: slope 130, rating 72.5, par 71.
+  await db.doc('courses/netCourse').set({
+    placeId: 'netCourse', marketId: 'kc', name: 'Net Test CC', address: '', location: null,
+    tier: 'supported', accessType: 'public', guestPolicy: null, bookingPlatform: null,
+    bookingUrl: null, bookingWindowDays: null, bookingOpensAtLocal: null,
+    holeHandicapOrder: null, holePars: null,
+    teeSets: [{ name: 'Blue', yardage: 6500, rating: 72.5, slope: 130, par: 71 }],
+    roundCount: 1,
+  });
+  const tid5 = 'netTest1';
+  await db.doc(`tournaments/${tid5}`).set({
+    marketId: 'kc', formatId: 'multiRoundStrokePlay', createdBy: 'org1', name: 'Net Test',
+    status: 'inProgress', structure: 'singleRound', entryFeeCents: 0, prizeType: 'cashPurse',
+    divisionMode: 'both', doubleDipRule: 'onePrizePerPlayer', entryIds: ['n1'],
+    minEntries: 1, maxEntries: 4,
+    registrationOpens: Timestamp.now(), registrationCloses: Timestamp.now(),
+    eligibility: {}, payoutTable: [], roundDeadlineDays: 7,
+  });
+  await db.doc('entries/n1').set({
+    tournamentId: tid5, userIds: ['p2'], teamId: null, teamName: null, captainId: 'p2',
+    combinedIndex: 12.4, flight: null, seed: 1, paymentIntentId: null,
+    paymentStatus: 'captured', status: 'active',
+  });
+  // 95% allowance: CH = 12.4×(130/113) + (72.5−71) = 15.766; ×0.95 = 14.98 → 15
+  await createScorecards(tid5, [{ id: 'n1', userIds: ['p2'], combinedIndex: 12.4 }], 1, ['netCourse'], 0.95);
+  const sc = (await db.doc(`scorecards/${tid5}_n1_1`).get()).data();
+  check('playing handicap frozen at draw (15)', sc.courseHandicap === 15, sc.courseHandicap);
+
+  await call(fns.submitRoundScore, 'p2', { tournamentId: tid5, round: 1, gross: 88 });
+  const sc2 = (await db.doc(`scorecards/${tid5}_n1_1`).get()).data();
+  check('net computed on submission (88 − 15 = 73)', sc2.net === 73, sc2.net);
+
+  // Gross format: allowance null → courseHandicap null → net stays null.
+  await createScorecards('grossRules1', [{ id: 'g1', userIds: ['p1'], combinedIndex: 7.1 }], 1, ['netCourse'], null);
+  const gsc = (await db.doc('scorecards/grossRules1_g1_1').get()).data();
+  check('gross format: no strokes even at a rated course', gsc.courseHandicap === null);
 
   console.log(`\n========== ${pass} passed, ${fail} failed ==========`);
   process.exit(fail ? 1 : 0);
