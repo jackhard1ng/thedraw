@@ -118,7 +118,9 @@ export function preMatchCard(args: {
     primer:
       'Match play, quickly: hole by hole, not total score. Low score wins the ' +
       'hole, ties are halved. Pick up when you can’t win a hole. "3&2" = up ' +
-      '3 with 2 to play, match over. All square after 18 → sudden death from #1.',
+      '3 with 2 to play, match over. All square after 18 → sudden death from #1. ' +
+      'Agree ground rules ON THE FIRST TEE — gimme range, lift-clean-place, ' +
+      'lateral drops — before you play, never after. You two are the committee.',
   };
 }
 

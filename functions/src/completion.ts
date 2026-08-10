@@ -115,7 +115,12 @@ export async function maybeCompleteTournament(tournamentId: string) {
       | { marketOrganizerId?: string | null; organizerSharePercent?: number }
       | undefined;
     if (market?.marketOrganizerId && (market.organizerSharePercent ?? 0) > 0) {
-      const orgCut = Math.round((adminTotal * market.organizerSharePercent!) / 100);
+      // Share is computed on the fee NET of card processing (~2.9% + 30¢ per
+      // entry) — on a capped-fee $500 head-to-head the processing eats most of
+      // the $40 fee, and sharing the gross would put the platform underwater.
+      const processingCents = Math.round(collectedCents * 0.029) + 30 * activeCount;
+      const orgBase = Math.max(0, adminTotal - processingCents);
+      const orgCut = Math.round((orgBase * market.organizerSharePercent!) / 100);
       if (orgCut > 0) {
         const orgUser = (await db.doc(`users/${market.marketOrganizerId}`).get()).data() as
           | { stripeConnectId: string | null }
