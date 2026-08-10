@@ -88,7 +88,7 @@ function FormatExplainer({
         </span>
         {strokesRule(format)}
       </p>
-      {indexRange && (
+      {indexRange ? (
         <p className="text-xs text-ink-soft">
           Open to indexes{' '}
           <span className="tnum">
@@ -96,7 +96,11 @@ function FormatExplainer({
           </span>{' '}
           — enforced at entry, frozen when the draw is made.
         </p>
-      )}
+      ) : gross ? (
+        <p className="text-xs text-pine">
+          No handicap needed — open to anyone. Lowest score wins, straight up.
+        </p>
+      ) : null}
       <p className="flex flex-wrap gap-x-3 gap-y-1">
         {format.scoring === 'matchPlay' && (
           <Term word="match play" def={GLOSSARY['match play']} />

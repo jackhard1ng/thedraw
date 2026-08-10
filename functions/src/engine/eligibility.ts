@@ -58,10 +58,12 @@ export function checkEligibility(
   if (user.status === 'banned') reasons.push('Account is banned.');
   if (user.status === 'restricted' && isPaid) reasons.push('Account is restricted to free events.');
 
-  const profileComplete =
-    !!user.displayName && user.age >= 18 && user.handicap.source !== 'self' && !!user.handicap.verifiedAtMs;
+  // Complete profile = identity only (real name, 18+). Index verification is a
+  // SEPARATE gate (requiresVerifiedIndex) so open gross events — where the
+  // index decides nothing — can welcome players with no handicap record.
+  const profileComplete = !!user.displayName && user.age >= 18;
   if (rules.requiresCompleteProfile && !profileComplete) {
-    reasons.push('Complete your profile (real name, age 18+, verified index).');
+    reasons.push('Complete your profile (real name, age 18+).');
   }
   if (rules.requiresVerifiedIndex && user.handicap.source === 'self') {
     reasons.push('A verified handicap index is required.');
@@ -69,7 +71,13 @@ export function checkEligibility(
   if (rules.requiresGhinVerified && user.handicap.source !== 'ghin') {
     reasons.push('This event requires a GHIN-verified index.');
   }
-  if (rules.maxHandicapVerificationAgeDays != null && days > rules.maxHandicapVerificationAgeDays) {
+  // Freshness only matters where the index matters — an open gross event
+  // doesn't care how stale (or absent) a handicap record is.
+  if (
+    rules.requiresVerifiedIndex &&
+    rules.maxHandicapVerificationAgeDays != null &&
+    days > rules.maxHandicapVerificationAgeDays
+  ) {
     reasons.push(`Re-verify your handicap within the last ${rules.maxHandicapVerificationAgeDays} days.`);
   }
   if (rules.indexRange && (user.handicap.index < rules.indexRange[0] || user.handicap.index > rules.indexRange[1])) {

@@ -114,8 +114,20 @@ export const createTournament = onCall(async (req) => {
     throw new HttpsError('failed-precondition', 'This format is not eligible for money events.');
   }
 
+  // The index is LOAD-BEARING when it decides entry (a band), strokes (an
+  // allowance or match play), or a net division — only then is verification
+  // demanded. An open gross event welcomes players with no handicap record:
+  // lowest score wins, there is nothing to fake (Jack's rule).
+  const indexLoadBearing =
+    (d.eligibility?.indexRange ?? null) != null ||
+    format.scoring === 'matchPlay' ||
+    (format as { handicapAllowance?: unknown }).handicapAllowance != null ||
+    d.divisionMode !== 'grossOnly';
+
+  const base = isPaid ? DEFAULT_PAID_ELIGIBILITY : FREE_ELIGIBILITY;
   const eligibility: EligibilityRules = {
-    ...(isPaid ? DEFAULT_PAID_ELIGIBILITY : FREE_ELIGIBILITY),
+    ...base,
+    ...(isPaid && !indexLoadBearing ? { requiresVerifiedIndex: false } : {}),
     ...(d.eligibility ?? {}),
   };
 

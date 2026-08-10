@@ -25,13 +25,10 @@ export interface EligibilityResult {
   reasons: string[]; // human-readable, shown verbatim in the UI
 }
 
+// Identity only — index verification is the separate requiresVerifiedIndex
+// gate, so open gross events can welcome players with no handicap record.
 function profileComplete(user: User): boolean {
-  return (
-    !!user.displayName &&
-    user.age >= 18 &&
-    user.handicap.source !== 'self' &&
-    user.handicap.verifiedAt != null
-  );
+  return !!user.displayName && user.age >= 18;
 }
 
 function indexInRange(handicap: Handicap, range: [number, number] | null): boolean {
@@ -69,7 +66,8 @@ export function checkEligibility(
     reasons.push('This event requires a GHIN-verified index.');
   }
 
-  if (e.maxHandicapVerificationAgeDays != null) {
+  // Freshness only matters where the index matters (mirrors the server rule).
+  if (e.requiresVerifiedIndex && e.maxHandicapVerificationAgeDays != null) {
     const fresh = freshness(user.handicap.verifiedAt, now);
     const days = user.handicap.verifiedAt
       ? (now - user.handicap.verifiedAt.toMillis()) / 86_400_000

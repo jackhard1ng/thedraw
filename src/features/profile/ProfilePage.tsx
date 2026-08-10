@@ -26,7 +26,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { deleteAccount } from '@/lib/callable';
 import { Badge, Button, Card, Num, Rule, SectionHeader, Spinner } from '@/components/ui';
-import { freshness, indexLine, sourceBadge } from '@/lib/handicap';
+import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { formatTeeTime } from '@/lib/format';
 import type { ReputationEvent, Round } from '@/types/models';
 
@@ -187,6 +187,15 @@ export function ProfilePage() {
             </p>
             <p className="mt-1 text-xl">
               <Num>{indexLine(profile.handicap)}</Num>
+            </p>
+            {/* The tier — stable while the decimal drifts; derived, never stored. */}
+            <p className="mt-1">
+              <Badge tone="tournament">
+                Tier {tierFor(profile.handicap.index).label}
+              </Badge>
+              <span className="ml-2 text-xs text-ink-faint">
+                {tierFor(profile.handicap.index).range}
+              </span>
             </p>
           </div>
           <div className="text-right">

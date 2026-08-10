@@ -97,11 +97,18 @@ export const createInstantEvent = onCall<{
   }
 
   // High-stakes gate above the template threshold; standard paid gate otherwise.
+  // Below the threshold, an open GROSS format relaxes the index requirement —
+  // the index decides nothing there, so no handicap record is needed to play.
+  const format = (await db.doc(`formats/${tpl.formatId}`).get()).data() as
+    | { scoring: string; handicapAllowance: unknown }
+    | undefined;
+  const indexLoadBearing =
+    format?.scoring === 'matchPlay' || format?.handicapAllowance != null;
   const eligibility =
     entryFeeCents > tpl.requiresGhinAboveCents
       ? HIGH_STAKES_ELIGIBILITY
       : entryFeeCents > 0
-        ? DEFAULT_PAID_ELIGIBILITY
+        ? { ...DEFAULT_PAID_ELIGIBILITY, ...(indexLoadBearing ? {} : { requiresVerifiedIndex: false }) }
         : FREE_ELIGIBILITY;
 
   // Registration closes shortly before the round so authorize/capture works the
