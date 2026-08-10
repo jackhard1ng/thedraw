@@ -55,12 +55,21 @@ export function splitPurse(
   return out;
 }
 
+/** Addendum-style cap: the admin fee never exceeds $20 per entry. */
+export const MAX_ADMIN_FEE_CENTS_PER_ENTRY = 2000;
+
 /**
  * The admin-fee itemization required by §7.3 — always disclosed at the point of
  * payment as "$X entry — $Y prize fund, $Z tournament administration".
  */
 export function itemizeEntry(entryFeeCents: Cents, adminFeePercent: number) {
-  const adminCents = Math.round((entryFeeCents * adminFeePercent) / 100);
+  // Fee = percentage CAPPED per entry: organizing a $500 match is the same
+  // work as a $50 match, so the fee stops scaling with the stakes. Cost-based
+  // pricing that also keeps the fee reading as a service charge, not a rake.
+  const adminCents = Math.min(
+    Math.round((entryFeeCents * adminFeePercent) / 100),
+    MAX_ADMIN_FEE_CENTS_PER_ENTRY,
+  );
   const prizeCents = entryFeeCents - adminCents;
   return {
     entryFeeCents,
