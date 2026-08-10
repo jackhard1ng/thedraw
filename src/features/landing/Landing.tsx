@@ -86,9 +86,9 @@ export function Landing() {
         never sells out
       </h1>
       <p className="mt-3 text-ink-soft">
-        Brackets, weekly games, and a real competitive record — for golfers
-        without a club. Enter any week. No roster cap. Play matches when both of
-        you actually can.
+        Tournaments, weeknight nines, head-to-head matches, and casual games —
+        with a real competitive record behind all of it. Enter any week. No
+        roster cap. Play when both of you actually can.
       </p>
 
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">

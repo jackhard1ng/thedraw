@@ -83,6 +83,37 @@ const FORMATS = [
     eligibleForMoney: true,
   },
 ];
+// 9-hole formats — the weeknight league replacement. Formats are data (§4):
+// adding these touches no engine code. Gross-only for nines in v1 (no stroke
+// allocation questions on a 9).
+FORMATS.push(
+  {
+    id: 'twilightNine',
+    name: 'Twilight Nine',
+    teamSize: 1,
+    scoring: 'strokePlay',
+    handicapAllowance: null, // gross
+    advancement: 'singleRound',
+    holes: 9,
+    groupSize: 4,
+    flightBy: 'individualIndex',
+    requiresWitness: true, // four mutual markers (§P3)
+    eligibleForMoney: true,
+  },
+  {
+    id: 'nineHoleMatch',
+    name: '9-Hole Match',
+    teamSize: 1,
+    scoring: 'matchPlay',
+    handicapAllowance: null, // scratch 9s in v1
+    advancement: 'bracket',
+    holes: 9,
+    flightBy: 'individualIndex',
+    requiresWitness: true,
+    eligibleForMoney: true,
+  },
+);
+
 for (const f of FORMATS) await db.doc(`formats/${f.id}`).set(f, { merge: true });
 console.log(`Seeded ${FORMATS.length} formats`);
 
@@ -129,6 +160,20 @@ const TEMPLATES = [
     active: true,
   },
 ];
+TEMPLATES.push({
+  id: 'twilightNine',
+  marketId: 'kc',
+  name: 'Twilight Nine',
+  formatId: 'twilightNine',
+  fieldSize: 4,
+  entryFeeMinCents: 1000,
+  entryFeeMaxCents: 10000,
+  allowedPayoutShapes: ['winnerTakeAll', '70_30'],
+  adminFeePercent: 10,
+  requiresGhinAboveCents: 7500,
+  active: true,
+});
+
 for (const t of TEMPLATES) await db.doc(`eventTemplates/${t.id}`).set(t, { merge: true });
 console.log(`Seeded ${TEMPLATES.length} instant-event templates`);
 
