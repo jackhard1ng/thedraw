@@ -287,10 +287,21 @@ export function CreatePostPage() {
             </Field>
 
             {stakes === 'money' && (
-              <p className="rounded-sm border border-rule bg-paper-sunken p-3 text-xs text-ink-soft">
-                Stakes are arranged and settled between players. The Draw never
-                collects, holds, or takes a cut of a player-arranged wager.
-              </p>
+              <div className="rounded-sm border border-rule bg-paper-sunken p-3 text-xs text-ink-soft">
+                <p>
+                  Stakes are arranged and settled between players. The Draw never
+                  collects, holds, or takes a cut of a player-arranged wager.
+                </p>
+                <p className="mt-2 text-ink">
+                  Heads up: cash at the course means settling up is on you two.
+                  Run it as an{' '}
+                  <a href="/tournaments/new-game" className="text-tournament underline underline-offset-2">
+                    official match
+                  </a>{' '}
+                  instead and both entries are collected before you tee off — the
+                  winner is paid automatically, nobody has to ask.
+                </p>
+              </div>
             )}
           </div>
         )}

@@ -183,6 +183,17 @@ export function PostDetailPage() {
           <p className="mt-4 whitespace-pre-wrap text-ink-soft">{post.description}</p>
         )}
 
+        {post.stakes === 'money' && (
+          <p className="mt-4 rounded-sm border border-rule bg-paper-sunken p-3 text-xs text-ink-soft">
+            This game has player-arranged stakes — settled between players, The
+            Draw touches none of it. Want it guaranteed?{' '}
+            <Link to="/tournaments/new-game" className="text-tournament underline underline-offset-2">
+              Make it an official match
+            </Link>{' '}
+            — entries collected up front, winner paid automatically.
+          </p>
+        )}
+
         <Rule className="my-4" />
 
         <div className="flex items-center justify-between">
