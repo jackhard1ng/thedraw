@@ -91,6 +91,16 @@ adding a format never touches the engine.
 - Live hole-by-hole scoring, held tee inventory, and negotiated league rates
   remain deferred per §6/§9.
 
+### App Store (decided: web first, native later)
+
+The web app IS the product until traction. When real users start asking "is
+there an app?" (~a few thousand actives), wrap THIS codebase with Capacitor —
+a packaging exercise, not a rewrite; web and store versions ship from the same
+code. Until then the PWA carries everything: QR → playing in under a minute
+with no install wall, every bracket/match/leaderboard a shareable URL, fixes
+deployed in minutes, and no app-review gatekeeper on a money-adjacent product.
+SMS covers the one thing iOS web apps can't (reliable deadline push).
+
 ## Stack (§3)
 
 - **Frontend** — React + Vite + TypeScript, PWA-first (no app store for v1)
