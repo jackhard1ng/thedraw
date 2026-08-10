@@ -87,14 +87,17 @@ export function checkEligibility(
     );
   }
 
-  // "minEvents OR minAttestedRounds" — two paths to eligibility (§5 defaults).
+  // Three paths through the "prove you're a real golfer" gate (§5): completed
+  // events, attested rounds, or a VERIFIED GHIN — an established club handicap
+  // record is exactly that proof, so it fast-tracks past the apprenticeship.
   const meetsEvents = stats.eventsCompleted >= (e.minEventsCompleted ?? 0);
   const meetsAttested =
     e.minAttestedRounds != null && stats.attestedRounds >= e.minAttestedRounds;
-  if (!meetsEvents && !meetsAttested) {
+  const meetsGhin = user.handicap.source === 'ghin' && user.handicap.verifiedAt != null;
+  if (!meetsEvents && !meetsAttested && !meetsGhin) {
     const parts = [`${e.minEventsCompleted ?? 0} completed events`];
     if (e.minAttestedRounds != null) parts.push(`${e.minAttestedRounds} attested rounds`);
-    reasons.push(`Need ${parts.join(' or ')} first.`);
+    reasons.push(`Need ${parts.join(' or ')} first — or verify a GHIN index for instant access.`);
   }
 
   if (e.minAttendanceRate != null && stats.attendanceRate < e.minAttendanceRate) {

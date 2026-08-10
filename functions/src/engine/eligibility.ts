@@ -76,10 +76,13 @@ export function checkEligibility(
     reasons.push(`Index must be within ${rules.indexRange[0]}–${rules.indexRange[1]}.`);
   }
 
+  // Verified GHIN fast-tracks the apprenticeship gate — an established club
+  // handicap record IS the "real golfer known to real people" proof (§5).
   const meetsEvents = stats.eventsCompleted >= (rules.minEventsCompleted ?? 0);
   const meetsAttested = rules.minAttestedRounds != null && stats.attestedRounds >= rules.minAttestedRounds;
-  if (!meetsEvents && !meetsAttested) {
-    reasons.push(`Need ${rules.minEventsCompleted ?? 0} completed events or ${rules.minAttestedRounds ?? 0} attested rounds first.`);
+  const meetsGhin = user.handicap.source === 'ghin' && user.handicap.verifiedAtMs != null;
+  if (!meetsEvents && !meetsAttested && !meetsGhin) {
+    reasons.push(`Need ${rules.minEventsCompleted ?? 0} completed events or ${rules.minAttestedRounds ?? 0} attested rounds first — or verify a GHIN index for instant access.`);
   }
   if (rules.minAttendanceRate != null && stats.attendanceRate < rules.minAttendanceRate) {
     reasons.push(`Attendance below ${Math.round(rules.minAttendanceRate * 100)}%.`);

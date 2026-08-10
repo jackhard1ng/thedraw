@@ -179,7 +179,7 @@ export const disputeResult = onCall<{ matchId: string; note: string }>(async (re
     const e = (await db.doc(`entries/${entryId}`).get()).data() as { captainId: string } | undefined;
     if (!e) continue;
     const u = (await db.doc(`users/${e.captainId}`).get()).data() as
-      | { displayName: string; createdAt: Timestamp }
+      | { displayName: string; createdAt: Timestamp; handicap?: { source: string; verifiedAt: Timestamp | null } }
       | undefined;
     if (!u) continue;
     const [played, priorDisputes] = await Promise.all([
@@ -187,8 +187,14 @@ export const disputeResult = onCall<{ matchId: string; note: string }>(async (re
       db.collection('reports').where('reportedBy', '==', e.captainId).where('targetType', '==', 'match').get(),
     ]);
     const months = Math.max(0, Math.round((Date.now() - u.createdAt.toMillis()) / (30 * 86_400_000)));
+    const hcpTag =
+      u.handicap?.source === 'ghin' && u.handicap.verifiedAt
+        ? 'GHIN-verified'
+        : u.handicap?.source === 'thirdParty' && u.handicap.verifiedAt
+          ? 'linked index'
+          : 'self-declared index';
     snapshot.push(
-      `${u.displayName}${e.captainId === uid ? ' (disputing)' : ''}: ${played.size} matches played, member ${months} mo, ${priorDisputes.size} prior dispute${priorDisputes.size === 1 ? '' : 's'} filed`,
+      `${u.displayName}${e.captainId === uid ? ' (disputing)' : ''}: ${played.size} matches played, member ${months} mo, ${priorDisputes.size} prior dispute${priorDisputes.size === 1 ? '' : 's'} filed, ${hcpTag}`,
     );
   }
 
