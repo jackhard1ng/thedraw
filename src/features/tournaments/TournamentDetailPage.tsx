@@ -47,9 +47,9 @@ const DAY = 86_400_000;
 
 const SCORING_BLURB: Record<Scoring, string> = {
   matchPlay: 'Played hole by hole against one opponent — win more holes than they do, not fewer total strokes. Ties on a hole are halved.',
-  strokePlay: 'Every stroke counts toward a total over the round; the lowest total wins.',
+  strokePlay: 'Every stroke counts toward a total over the round; the lowest total wins. Hole everything out — no gimmes in stroke play, your score is against the whole field.',
   stableford: 'Points per hole against a target, rewarding aggressive play — highest points wins.',
-  scramble: 'A team format: everyone hits, you play the best ball, and repeat until holed.',
+  scramble: 'A team format: everyone hits, you play the best ball, and repeat until holed. Putt everything out — no gimmes outside match play.',
 };
 
 /** Format explanation with the load-bearing words made tappable (§5). */
