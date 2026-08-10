@@ -102,7 +102,12 @@ export async function maybeCompleteTournament(tournamentId: string) {
     // cost more in Stripe fees than it collects. If the percentage fee across
     // the field falls short, the shortfall comes out of the pool.
     const collectedCents = t.entryFeeCents * activeCount;
-    const adminTotal = Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS);
+    // The $10 floor only applies when a fee is configured at all — a 0%
+    // event (launch promo, at-cost season) is genuinely free of platform fees.
+    const adminTotal =
+      t.adminFeePercent > 0
+        ? Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS)
+        : 0;
     const poolCents = Math.max(0, collectedCents - adminTotal);
 
     // City-organizer revenue share (spec Phase 5): the market's organizer —
