@@ -31,8 +31,8 @@ export default {
           DEFAULT: '#0A46C2',
           soft: '#2E66DE',
         },
-        // Energy accent: the ball — used sparingly (mark dot, live moments)
-        ball: '#E8720C',
+        // Retired accent (was the orange ball); the mark's ball is white now.
+        ball: '#FFFFFF',
         // Support: slate steel, secondary only (replaces pine)
         pine: {
           DEFAULT: '#33567A',

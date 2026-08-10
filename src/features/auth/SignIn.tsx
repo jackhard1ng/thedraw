@@ -90,7 +90,7 @@ export function SignIn() {
         <path d="M-20 520 H60 V620 H140 M-20 720 H60 V620" opacity="0.6" />
         <path d="M140 620 H220 V330" opacity="0.45" />
         <path d="M300 330 H380" opacity="0.35" />
-        <circle cx="385" cy="330" r="5" className="text-ball" fill="currentColor" stroke="none" opacity="0.5" />
+        <circle cx="385" cy="330" r="5" fill="#FFFFFF" stroke="currentColor" strokeWidth="1.5" opacity="0.7" />
       </svg>
 
       <div className="relative mb-8 text-center">

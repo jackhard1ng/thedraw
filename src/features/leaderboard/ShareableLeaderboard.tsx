@@ -64,17 +64,18 @@ export function ShareableLeaderboard({ tournamentId }: { tournamentId: string })
         >
           <rect width={W} height={H} fill={PAPER} />
 
-          {/* App mark — the curve + flag from icon.svg */}
-          <g transform="translate(28,28) scale(0.13)">
-            <path
-              d="M112 112 H240 Q352 112 352 256 Q352 400 240 400 H112"
-              fill="none"
-              stroke={INK}
-              strokeWidth={28}
-              strokeLinecap="square"
-            />
-            <line x1={352} y1={256} x2={432} y2={256} stroke={RED} strokeWidth={28} />
-            <circle cx={432} cy={256} r={26} fill={RED} />
+          {/* App mark — the bracket-D with the white ball in the champion slot */}
+          <g transform="translate(24,20) scale(0.52)">
+            <g stroke={RED} strokeWidth={8} strokeLinecap="square" fill="none">
+              <path d="M24 14 V86" />
+              <path d="M24 14 H50 Q74 14 76 38" />
+              <path d="M24 86 H50 Q74 86 76 62" />
+              <path d="M24 36 H44" />
+              <path d="M24 64 H44" />
+              <path d="M44 36 V50 H58" />
+              <path d="M44 64 V50" />
+            </g>
+            <circle cx={76} cy={50} r={11} fill="#FFFFFF" stroke={RED} strokeWidth={4.5} />
           </g>
 
           <text
