@@ -270,6 +270,8 @@ export type EntryStatus = 'active' | 'eliminated' | 'withdrawn' | 'forfeited';
 export interface Entry {
   tournamentId: string;
   userIds: string[]; // 1 for singles, 2 for teams
+  /** Denormalized at entry so public pages never read the users collection. */
+  displayNames?: string[];
   teamId: string | null;
   teamName: string | null;
   captainId: string;

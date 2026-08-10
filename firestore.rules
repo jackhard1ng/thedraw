@@ -67,7 +67,7 @@ service cloud.firestore {
     // ---- courses: read-only; a client may PROPOSE a listed course via a
     //      separate courseSubmissions collection, never write courses directly ----
     match /courses/{placeId} {
-      allow read: if isSignedIn();
+      allow read: if true; // public — course pages and records are spectating
       allow write: if false;
     }
     match /courseSubmissions/{subId} {
@@ -79,7 +79,8 @@ service cloud.firestore {
     // ---- roundPosts: a member owns their own posts; joins go through a
     //      Cloud Function so slotsFilled and joinedUserIds stay authoritative ----
     match /roundPosts/{postId} {
-      allow read: if isSignedIn();
+      allow read: if true; // public — the live board is the landing page's proof
+
       allow create: if isActive()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.slotsFilled == 0
@@ -136,16 +137,20 @@ service cloud.firestore {
     }
 
     // ---- everything the spec marks Cloud-Function-only: never client-writable ----
-    match /tournaments/{id}        { allow read: if isSignedIn(); allow write: if false; }
-    match /entries/{id}            { allow read: if isSignedIn(); allow write: if false; }
-    match /matches/{id}            { allow read: if isSignedIn(); allow write: if false; }
-    match /scorecards/{id}         { allow read: if isSignedIn(); allow write: if false; }
-    match /teams/{id}              { allow read: if isSignedIn(); allow write: if false; }
-    match /awards/{id}             { allow read: if isSignedIn(); allow write: if false; }
-    match /formats/{id}            { allow read: if isSignedIn(); allow write: if false; }
+    // SPECTATING IS PUBLIC (§5 — shareable match pages, results feed, the
+    // intramural bulletin board). These collections are readable without auth:
+    // they carry competitive records and denormalized display names only —
+    // never phone numbers, ages, or contact data (users/ stays auth-gated).
+    match /tournaments/{id}        { allow read: if true; allow write: if false; }
+    match /entries/{id}            { allow read: if true; allow write: if false; }
+    match /matches/{id}            { allow read: if true; allow write: if false; }
+    match /scorecards/{id}         { allow read: if true; allow write: if false; }
+    match /teams/{id}              { allow read: if true; allow write: if false; }
+    match /awards/{id}             { allow read: if true; allow write: if false; }
+    match /formats/{id}            { allow read: if true; allow write: if false; }
     match /eventTemplates/{id}     { allow read: if isSignedIn(); allow write: if false; }
-    match /tourStops/{id}          { allow read: if isSignedIn(); allow write: if false; }
-    match /tourSeries/{id}         { allow read: if isSignedIn(); allow write: if false; }
+    match /tourStops/{id}          { allow read: if true; allow write: if false; }
+    match /tourSeries/{id}         { allow read: if true; allow write: if false; }
     match /ledger/{id}             { allow read: if false;        allow write: if false; }
     match /reputationEvents/{id}   { allow read: if isSignedIn(); allow write: if false; }
 

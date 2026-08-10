@@ -281,12 +281,16 @@ export function useFormat(id: string | undefined): Format | null {
   return fmt;
 }
 
-/** Display name + frozen index for an entry, resolving singles via `users`. */
+/** Display name + frozen index for an entry. Prefers the denormalized names
+ * (public-page safe); falls back to a users lookup for legacy entries. */
 export function entryDisplay(
   entry: EntryWithId | Entry,
   users: Record<string, User>,
 ): { name: string; index: number } {
   if (entry.teamName) return { name: entry.teamName, index: entry.combinedIndex };
+  if (entry.displayNames?.length) {
+    return { name: entry.displayNames.join(' / '), index: entry.combinedIndex };
+  }
   const names = entry.userIds.map((uid) => users[uid]?.displayName ?? '—');
   return { name: names.join(' / '), index: entry.combinedIndex };
 }

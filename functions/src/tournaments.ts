@@ -244,14 +244,18 @@ export const enterTournament = onCall(async (req) => {
 
   const format = await getFormat(t.formatId);
 
-  // Build the roster + frozen combined index.
+  // Build the roster + frozen combined index. Display names are DENORMALIZED
+  // here so public spectating pages (rules: entries are world-readable) never
+  // need the auth-gated users collection, which carries phones and ages.
   const userIds = [uid];
+  const displayNames = [user.displayName];
   let combinedIndex = user.handicap.index;
   if (format.teamSize > 1) {
     if (!partnerId) throw new HttpsError('invalid-argument', 'This format needs a partner.');
     const partner = await getUser(partnerId);
     if (partner.status === 'banned') throw new HttpsError('failed-precondition', 'Partner is not eligible.');
     userIds.push(partnerId);
+    displayNames.push(partner.displayName);
     combinedIndex = user.handicap.index + partner.handicap.index; // frozen sum (§4)
   }
 
@@ -269,6 +273,7 @@ export const enterTournament = onCall(async (req) => {
     tx.set(entryRef, {
       tournamentId,
       userIds,
+      displayNames,
       teamId: teamId ?? null,
       teamName: teamName ?? null,
       captainId: uid,

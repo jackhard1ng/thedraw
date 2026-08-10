@@ -62,6 +62,9 @@ export function Onboarding() {
         stripeConnectId: null,
         createdAt: serverTimestamp(),
         status: 'active',
+        // Flyer/QR attribution captured on the landing page (?src=...), so
+        // every league drop is measurable.
+        referralSource: localStorage.getItem('thedraw.src') ?? null,
       });
       // AuthContext's snapshot listener will pick up the new profile.
     } catch (e) {

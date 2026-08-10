@@ -10,7 +10,7 @@ import { Spinner } from '@/components/ui';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { BottomNav } from '@/components/BottomNav';
 import { Masthead } from '@/components/Mark';
-import { SignIn } from '@/features/auth/SignIn';
+import { Landing } from '@/features/landing/Landing';
 import { Onboarding } from '@/features/onboarding/Onboarding';
 import { BoardPage } from '@/features/board/BoardPage';
 import { CreatePostPage } from '@/features/board/CreatePostPage';
@@ -30,7 +30,7 @@ function Shell() {
     );
   }
 
-  if (!fbUser) return <SignIn />;
+  if (!fbUser) return <Landing />;
   if (!profile) return <Onboarding />;
 
   return (
