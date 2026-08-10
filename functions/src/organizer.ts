@@ -43,6 +43,15 @@ export const resolveDispute = onCall<{ matchId: string; winnerEntryId: string; m
   if (!match) throw new HttpsError('not-found', 'Match not found.');
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string } | undefined;
   await requireOrganizer(uid, t?.marketId ?? '');
+  // A market organizer may PLAY in events (their revenue share is market-level,
+  // not event-level) — but never referee a match they're competing in.
+  for (const entryId of match.entryIds) {
+    if (!entryId) continue;
+    const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+    if (e?.userIds.includes(uid)) {
+      throw new HttpsError('permission-denied', 'You are a competitor in this match — a different organizer or admin must rule.');
+    }
+  }
   if (!isValidMargin(req.data.margin) || !loserOf(match.entryIds, req.data.winnerEntryId)) {
     throw new HttpsError('invalid-argument', 'Provide a valid winner and margin.');
   }

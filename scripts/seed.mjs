@@ -24,6 +24,10 @@ const KC = {
   enabledFormats: ['singlesMatch', 'twoManScramble', 'grossFoursome'],
   organizerIds: [], // populated when the first organizer is appointed
   adminFeePercent: 25,
+  // Phase 5 franchise economics: the market organizer (Jack in KC; a local
+  // golf influencer elsewhere) earns this % of every admin fee in the market.
+  marketOrganizerId: null, // set to the organizer's uid when appointed
+  organizerSharePercent: 30,
 };
 
 await db.doc(`markets/${KC.id}`).set(KC, { merge: true });

@@ -104,6 +104,34 @@ export async function maybeCompleteTournament(tournamentId: string) {
     const collectedCents = t.entryFeeCents * activeCount;
     const adminTotal = Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS);
     const poolCents = Math.max(0, collectedCents - adminTotal);
+
+    // City-organizer revenue share (spec Phase 5): the market's organizer —
+    // the human doing the regulation labor (verifying handicaps, resolving
+    // disputes, recruiting courses) — earns a percentage of EVERY admin fee in
+    // their market, including instant events they never touched. This is the
+    // franchise incentive that lets city #4 run without Jack. The event
+    // CREATOR never shares in the fee (§7.4 stays intact).
+    const market = (await db.doc(`markets/${t.marketId}`).get()).data() as
+      | { marketOrganizerId?: string | null; organizerSharePercent?: number }
+      | undefined;
+    if (market?.marketOrganizerId && (market.organizerSharePercent ?? 0) > 0) {
+      const orgCut = Math.round((adminTotal * market.organizerSharePercent!) / 100);
+      if (orgCut > 0) {
+        const orgUser = (await db.doc(`users/${market.marketOrganizerId}`).get()).data() as
+          | { stripeConnectId: string | null }
+          | undefined;
+        let stripeRef = 'pending-onboarding';
+        if (stripeEnabled() && orgUser?.stripeConnectId) {
+          try {
+            const tr = await stripePayout({ amountCents: orgCut, destinationConnectId: orgUser.stripeConnectId, tournamentId, toUserId: market.marketOrganizerId });
+            stripeRef = tr.id;
+          } catch (err) {
+            console.error(`organizer share failed: ${(err as Error).message}`);
+          }
+        }
+        await writeLedger({ type: 'adminFee', amountCents: orgCut, fromUserId: null, toUserId: market.marketOrganizerId, tournamentId, matchId: null, stripeRef, note: `market organizer share (${market.organizerSharePercent}% of admin)` });
+      }
+    }
     const assignments = computePayouts(poolCents, t.payoutTable as PayoutRow[], standings, t.doubleDipRule);
     for (const a of assignments) {
       const e = entries.find((x) => x.id === a.entryId);
