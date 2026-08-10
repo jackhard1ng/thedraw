@@ -41,6 +41,7 @@ import {
 } from './useTournaments';
 import { PayoutGrid } from './PayoutGrid';
 import { RegistrationForm, type RegistrationValue } from './RegistrationForm';
+import { ChatThread } from '@/features/chat/ChatThread';
 
 const DAY = 86_400_000;
 
@@ -384,6 +385,20 @@ export function TournamentDetailPage() {
       </div>
 
       <Rule className="my-8" />
+
+      {/* Field chat — self-serve events organize their own tee times here.
+          Entered players only; threadId = tournamentId. */}
+      {myEntry && (tournament.status === 'open' || tournament.status === 'inProgress') && (
+        <div className="mb-8">
+          <SectionHeader>Field chat</SectionHeader>
+          <p className="mb-2 text-xs text-ink-faint">
+            Everyone entered can post — organize tee times, pairings, and logistics here.
+          </p>
+          <Card className="p-4">
+            <ChatThread threadId={tournament.id} />
+          </Card>
+        </div>
+      )}
 
       {/* Eligibility + enter */}
       {myEntry ? (

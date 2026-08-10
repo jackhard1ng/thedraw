@@ -40,6 +40,7 @@ import {
   collectGreenFees,
 } from '@/lib/callable';
 import { dollarsToCents, formatCents } from '@/lib/money';
+import { ChatThread } from '@/features/chat/ChatThread';
 import {
   bracketSize,
   entriesRemainingAt,
@@ -610,6 +611,17 @@ export function MatchPage() {
 
         {error && <p className="mt-3 text-sm text-tournament">{error}</p>}
       </div>
+
+      {/* The coordination surface (Jack's rule: organizing a tee time needs a
+          conversation, not just an availability log). Competitors only. */}
+      {myEntry && match.status !== 'complete' && match.status !== 'forfeited' && (
+        <div className="mt-6">
+          <SectionHeader>Coordinate</SectionHeader>
+          <Card className="p-4">
+            <ChatThread threadId={match.id} />
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
