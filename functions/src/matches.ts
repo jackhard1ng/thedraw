@@ -167,14 +167,39 @@ export const disputeResult = onCall<{ matchId: string; note: string }>(async (re
   if (!(await actorEntry(match, uid))) throw new HttpsError('permission-denied', 'You are not in this match.');
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string; name: string } | undefined;
   await ref.update({ 'result.disputed': true });
-  // Route to the market organizer with the scorecard attached (§5).
+
+  // Credibility snapshot: a dispute is one player's word against another's, so
+  // the report carries both track records — matches played, prior disputes
+  // filed, membership age. EVIDENCE for the organizer, never an auto-verdict:
+  // the scorecard photo still rules, and a long record must not let a veteran
+  // steamroll a newcomer.
+  const snapshot: string[] = [];
+  for (const entryId of match.entryIds) {
+    if (!entryId) continue;
+    const e = (await db.doc(`entries/${entryId}`).get()).data() as { captainId: string } | undefined;
+    if (!e) continue;
+    const u = (await db.doc(`users/${e.captainId}`).get()).data() as
+      | { displayName: string; createdAt: Timestamp }
+      | undefined;
+    if (!u) continue;
+    const [played, priorDisputes] = await Promise.all([
+      db.collection('reputationEvents').where('userId', '==', e.captainId).where('type', '==', 'played').get(),
+      db.collection('reports').where('reportedBy', '==', e.captainId).where('targetType', '==', 'match').get(),
+    ]);
+    const months = Math.max(0, Math.round((Date.now() - u.createdAt.toMillis()) / (30 * 86_400_000)));
+    snapshot.push(
+      `${u.displayName}${e.captainId === uid ? ' (disputing)' : ''}: ${played.size} matches played, member ${months} mo, ${priorDisputes.size} prior dispute${priorDisputes.size === 1 ? '' : 's'} filed`,
+    );
+  }
+
+  // Route to the market organizer with the scorecard + credibility attached (§5).
   await db.collection('reports').add({
     reportedBy: uid,
     targetType: 'match',
     targetId: req.data.matchId,
     marketId: t?.marketId ?? '',
     reason: `Disputed result: ${String(req.data.note).slice(0, 500)}`,
-    context: null,
+    context: snapshot.join(' · ') || null,
     createdAt: FieldValue.serverTimestamp(),
     status: 'open',
   });
