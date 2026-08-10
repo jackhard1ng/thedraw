@@ -346,11 +346,21 @@ export function TournamentDetailPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-ink-soft">
-                  Tournament administration ({tournament.adminFeePercent}%)
+                  Tournament administration
+                  {item.adminCents < Math.round((item.entryFeeCents * tournament.adminFeePercent) / 100)
+                    ? ' (capped)'
+                    : ` (${tournament.adminFeePercent}%)`}
                 </span>
                 <Num>{formatCents(item.adminCents)}</Num>
               </div>
             </div>
+            {/* What the fee buys — shown at the moment of payment, so nobody
+                wonders. Capped at $20/entry: the fee prices the work, not the pot. */}
+            <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-faint">
+              The fee covers entry collection, the draw, scheduling and results
+              machinery, dispute arbitration, and automatic payout to winners.
+              It is capped at $20 per entry and never scales with the purse.
+            </p>
           </Card>
         )}
       </div>
