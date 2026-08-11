@@ -81,14 +81,15 @@ export function Landing() {
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6 py-10 text-center">
       <Mark className="mx-auto mb-4 h-14 w-14 text-ink" />
       <h1 className="text-4xl leading-tight">
-        The league that
+        We are the league.
         <br />
-        never sells out
+        We are the tournament.
       </h1>
       <p className="mt-3 text-ink-soft">
-        Tournaments, weeknight nines, head-to-head matches, and casual games —
-        with a real competitive record behind all of it. Enter any week. No
-        roster cap. Play when both of you actually can.
+        Stop digging through course websites for the one league that filled up
+        in March. Every tournament, weeknight nine, and money match in Kansas
+        City lives here — and it never sells out. Enter any week. Play at your
+        level. Winners paid automatically.
       </p>
 
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">
