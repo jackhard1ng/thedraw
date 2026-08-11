@@ -3,13 +3,23 @@
  * Submit your own round score, and confirm a playing partner's — mirroring the
  * match-result confirmation flow, where silence auto-confirms (§P1). Writes go
  * through the submitRoundScore / confirmRoundScore callables.
+ *
+ * Cards are PRE-CREATED at the draw (that's where the stroke rule freezes), so
+ * "may I submit?" is a question about the card's STATUS — awaitingResult means
+ * the form; anything later means the read-only view.
  */
 import { useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Card, Num, Rule } from '@/components/ui';
 import { relativeDays } from '@/lib/format';
 import { submitRoundScore, confirmRoundScore } from '@/lib/callable';
-import { useTournamentScorecards } from '@/features/tournaments/useTournaments';
+import { useTournamentEntries, useTournamentScorecards } from '@/features/tournaments/useTournaments';
+
+const CARD_STATUS_LABEL: Record<string, string> = {
+  awaitingResult: 'Waiting on your score',
+  awaitingConfirmation: 'Submitted — awaiting a partner’s confirmation',
+  complete: 'Official',
+};
 
 export function StrokePlayScoreCard({
   tournamentId,
@@ -21,6 +31,7 @@ export function StrokePlayScoreCard({
   const { fbUser } = useAuth();
   const uid = fbUser?.uid;
   const cards = useTournamentScorecards(tournamentId);
+  const entries = useTournamentEntries(tournamentId);
 
   const [rnd, setRnd] = useState(round);
   const [gross, setGross] = useState('');
@@ -32,6 +43,11 @@ export function StrokePlayScoreCard({
     () => cards?.find((c) => c.userId === uid && c.round === rnd) ?? null,
     [cards, uid, rnd],
   );
+
+  const nameForEntry = (entryId: string) => {
+    const e = (entries ?? []).find((x) => x.id === entryId);
+    return e?.teamName || (e as { displayNames?: string[] } | undefined)?.displayNames?.join(' / ') || 'A partner';
+  };
 
   // Partners' cards awaiting confirmation that I didn't submit.
   const toConfirm = useMemo(
@@ -66,6 +82,8 @@ export function StrokePlayScoreCard({
     }
   }
 
+  const submittable = myCard != null && myCard.status === 'awaitingResult';
+
   return (
     <div className="space-y-6">
       <Card className="p-4">
@@ -85,25 +103,17 @@ export function StrokePlayScoreCard({
 
         <Rule className="my-3" />
 
-        {myCard ? (
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-ink-soft">Gross</span>
-              <Num className="text-lg text-ink">{myCard.gross}</Num>
-            </div>
-            {myCard.net != null && (
-              <div className="flex justify-between">
-                <span className="text-ink-soft">Net</span>
-                <Num className="text-ink">{myCard.net}</Num>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-ink-soft">Status</span>
-              <span className="text-ink">{myCard.status}</span>
-            </div>
-          </div>
-        ) : (
+        {myCard == null ? (
+          <p className="text-sm text-ink-faint">No scorecard for this round.</p>
+        ) : submittable ? (
           <div className="space-y-3">
+            {myCard.courseHandicap != null && (
+              <p className="text-xs text-ink-soft">
+                Your playing handicap for this round is{' '}
+                <Num>{myCard.courseHandicap}</Num> (frozen at the draw) — submit
+                gross; net is computed for you.
+              </p>
+            )}
             <input
               type="number"
               className="field-input tnum"
@@ -121,6 +131,23 @@ export function StrokePlayScoreCard({
               {busy ? 'Submitting…' : `Submit round ${rnd} score`}
             </Button>
           </div>
+        ) : (
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-ink-soft">Gross</span>
+              <Num className="text-lg text-ink">{myCard.gross}</Num>
+            </div>
+            {myCard.net != null && (
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Net</span>
+                <Num className="text-ink">{myCard.net}</Num>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-ink-soft">Status</span>
+              <span className="text-ink">{CARD_STATUS_LABEL[myCard.status] ?? myCard.status}</span>
+            </div>
+          </div>
         )}
         {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
       </Card>
@@ -130,9 +157,19 @@ export function StrokePlayScoreCard({
           <p className="mb-2 font-display uppercase tracking-wide text-xs text-ink-soft">
             Confirm a partner's card
           </p>
+          <p className="mb-2 text-xs text-ink-faint">
+            You're vouching that you watched this score happen — the §4 marker.
+          </p>
           <div className="space-y-2">
             {toConfirm.map((c) => (
-              <ConfirmRow key={`${c.entryId}_${c.round}`} scorecardId={`${c.tournamentId}_${c.entryId}_${c.round}`} gross={c.gross} round={c.round} deadline={c.confirmDeadline?.toMillis() ?? null} />
+              <ConfirmRow
+                key={`${c.entryId}_${c.round}`}
+                scorecardId={`${c.tournamentId}_${c.entryId}_${c.round}`}
+                playerName={nameForEntry(c.entryId)}
+                gross={c.gross}
+                round={c.round}
+                deadline={c.confirmDeadline?.toMillis() ?? null}
+              />
             ))}
           </div>
         </div>
@@ -143,11 +180,13 @@ export function StrokePlayScoreCard({
 
 function ConfirmRow({
   scorecardId,
+  playerName,
   gross,
   round,
   deadline,
 }: {
   scorecardId: string;
+  playerName: string;
   gross: number;
   round: number;
   deadline: number | null;
@@ -158,7 +197,7 @@ function ConfirmRow({
     <Card className="flex items-center justify-between p-3">
       <div className="text-sm">
         <span className="text-ink">
-          R<Num>{round}</Num> · gross <Num>{gross}</Num>
+          {playerName} — R<Num>{round}</Num> · gross <Num>{gross}</Num>
         </span>
         {deadline && (
           <span className="ml-2 text-xs text-ink-faint">

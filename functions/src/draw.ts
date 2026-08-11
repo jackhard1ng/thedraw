@@ -93,6 +93,19 @@ interface Req {
   createdAt: Timestamp;
 }
 
+const DAY_INDEX: Record<string, number> = {
+  sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+};
+
+/** End (23:59 CT ≈ 05:59 UTC next day) of the next occurrence of `day`. */
+export function nextOccurrenceEnd(day: string, fromMs: number): number {
+  const target = DAY_INDEX[day] ?? 6;
+  const from = new Date(fromMs);
+  const ahead = (target - from.getUTCDay() + 7) % 7 || 7; // today's draw → next week
+  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + ahead, 23, 59));
+  return d.getTime() + 6 * 3_600_000; // shift to roughly end-of-day Central
+}
+
 /** Hourly: expire stale requests, then match what can be matched. */
 export async function drawSweep(now: number) {
   const stale = await db
@@ -124,6 +137,30 @@ export async function drawSweep(now: number) {
     buckets.get(key)!.push(r);
   }
 
+  // Blocks veto a grouping in either direction — being drawn with someone you
+  // blocked would be worse than not being drawn at all. Results are memoized
+  // per sweep since the same pair recurs across candidate windows.
+  const blockCache = new Map<string, boolean>();
+  async function pairBlocked(a: string, b: string): Promise<boolean> {
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (!blockCache.has(key)) {
+      const [x, y] = await Promise.all([
+        db.doc(`blocks/${a}_${b}`).get(),
+        db.doc(`blocks/${b}_${a}`).get(),
+      ]);
+      blockCache.set(key, x.exists || y.exists);
+    }
+    return blockCache.get(key)!;
+  }
+  async function groupBlocked(group: Req[]): Promise<boolean> {
+    for (let a = 0; a < group.length; a++) {
+      for (let b = a + 1; b < group.length; b++) {
+        if (await pairBlocked(group[a].userId, group[b].userId)) return true;
+      }
+    }
+    return false;
+  }
+
   for (const [, reqs] of buckets) {
     // Sort by index so adjacent players are compatible; greedy windows of 4→3→2
     // with spread ≤ MAX_INDEX_SPREAD and at least one willing booker.
@@ -138,6 +175,7 @@ export async function drawSweep(now: number) {
         if (spread > MAX_INDEX_SPREAD) continue;
         if (!candidate.some((r) => r.willingToBook)) continue;
         if (!areasCompatible(candidate)) continue;
+        if (await groupBlocked(candidate)) continue;
         group = candidate;
         break;
       }
@@ -145,13 +183,13 @@ export async function drawSweep(now: number) {
         i += 1; // this player waits for more entrants
         continue;
       }
-      await createDrawGroup(group);
+      await createDrawGroup(group, now);
       i += group.length;
     }
   }
 }
 
-async function createDrawGroup(group: Req[]) {
+async function createDrawGroup(group: Req[], now: number) {
   // Booker: earliest-entered willing booker — deterministic, named, on the hook.
   const booker = [...group]
     .filter((r) => r.willingToBook)
@@ -163,8 +201,12 @@ async function createDrawGroup(group: Req[]) {
     marketId: group[0].marketId,
     createdBy: booker.userId,
     title: `${dayLabel} draw group`,
-    description: `Drawn by The Draw. ${booker.displayName} books and posts the tee time in chat.`,
+    description: `Drawn by The Draw. ${booker.displayName} books and confirms the tee time on this page.`,
     timing: { mode: 'flexible', fixedTime: null, windowStart: null, windowEnd: null, flexibleDays: [group[0].day] },
+    // The concrete date this group is FOR — the lifecycle sweep uses it to
+    // nudge the booker and to complete/expire the post (a flexible post would
+    // otherwise never complete, killing the attestation funnel).
+    targetDate: Timestamp.fromMillis(nextOccurrenceEnd(group[0].day, now)),
     course: { mode: 'flexible', placeId: null, preferredPlaceIds: null },
     booking: 'needsBooking',
     slotsTotal: group.length,
@@ -196,8 +238,8 @@ async function createDrawGroup(group: Req[]) {
       userId: r.userId,
       title: `You're drawn — ${dayLabel}`,
       body: isBooker
-        ? `Your group: ${roster}. YOU book — grab a tee time and post it in the group chat.`
-        : `Your group: ${roster}. ${booker.displayName} books and will post the time in chat.`,
+        ? `Your group: ${roster}. YOU book — grab a tee time, then hit "Confirm the tee time" on the post so everyone gets locked in.`
+        : `Your group: ${roster}. ${booker.displayName} books; you'll get a text when the tee time is confirmed.`,
       deadlineCritical: true, // a formed group is time-sensitive — SMS it
       link: `/post/${postRef.id}`,
     });

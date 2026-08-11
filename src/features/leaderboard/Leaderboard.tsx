@@ -53,7 +53,14 @@ export function LbTable({
                 <td className="py-1.5 pr-2">
                   <Num>{row.position}</Num>
                 </td>
-                <td className="py-1.5 pr-2">{row.name}</td>
+                <td className="py-1.5 pr-2">
+                  {row.name}
+                  {inp?.provisional && (
+                    <span className="ml-1 align-super text-[0.6rem] text-ink-faint" title="Includes a score awaiting confirmation">
+                      *
+                    </span>
+                  )}
+                </td>
                 <td className="py-1.5 pr-2 text-right align-top">
                   <Num>{row.index.toFixed(1)}</Num>
                 </td>
@@ -98,7 +105,8 @@ export function Leaderboard({ tournamentId }: { tournamentId: string }) {
       </div>
       <p className="text-xs text-ink-faint">
         The small figure under each round is your differential — strokes above or
-        below your index that round.
+        below your index that round. An asterisk marks a score still awaiting a
+        partner's confirmation.
       </p>
       {showNet && (
         <div>

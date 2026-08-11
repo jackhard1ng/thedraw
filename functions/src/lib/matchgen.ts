@@ -10,6 +10,7 @@
 import { db, FieldValue, Timestamp } from '../shared';
 import { firstRoundPairings, advancementTarget, nextPowerOfTwo, totalRounds } from '../engine/bracket';
 import { podPairings } from '../engine/pods';
+import { notify } from './notify';
 
 function deadline(days: number): Timestamp {
   return Timestamp.fromMillis(Date.now() + days * 86_400_000);
@@ -214,6 +215,33 @@ async function placeIntoSlot(tid: string, round: number, index: number, slot: nu
       'scheduling.deadline': bothPresent ? Timestamp.fromMillis(Date.now() + 2 * 86_400_000) : null,
     });
   });
+
+  // A newly-formed pairing quietly starts a 48h forfeit clock — winning round 1
+  // must never be how you lose round 2. Tell both sides the moment the
+  // matchup exists (§P1: every deadline announces itself).
+  const after = (await ref.get()).data() as (NewMatch & { pairNoticeSent?: boolean }) | undefined;
+  if (!after || after.status !== 'scheduling' || after.pairNoticeSent) return;
+  await ref.update({ pairNoticeSent: true });
+  const entryDocs = await Promise.all(
+    after.entryIds.map(async (eid) =>
+      eid ? ((await db.doc(`entries/${eid}`).get()).data() as { userIds: string[]; displayNames?: string[]; teamName: string | null } | undefined) : undefined,
+    ),
+  );
+  const nameOf = (i: number) =>
+    entryDocs[i]?.teamName || entryDocs[i]?.displayNames?.join(' / ') || 'your opponent';
+  for (let i = 0; i < 2; i++) {
+    const e = entryDocs[i];
+    if (!e) continue;
+    for (const u of e.userIds) {
+      await notify({
+        userId: u,
+        title: `Round ${round}: you play ${nameOf(1 - i)}`,
+        body: 'Your next match is live. Post your availability within 48 hours — silence forfeits.',
+        deadlineCritical: true,
+        link: `/matches/${id}`,
+      });
+    }
+  }
 }
 
 export { FieldValue };

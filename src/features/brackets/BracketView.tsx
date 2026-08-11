@@ -11,6 +11,7 @@
  * lexically — otherwise m10 sorts before m2), and adjacent matches are paired so
  * the rails connect each pair into the next round.
  */
+import { Link } from 'react-router-dom';
 import { Num, Spinner } from '@/components/ui';
 import { roundLabel } from '@/lib/education';
 import {
@@ -72,8 +73,13 @@ function MatchCell({
   users: Record<string, User>;
 }) {
   const winner = match.result.winnerEntryId;
+  // Every cell is a door to the match page — scheduling, chat, and results all
+  // live there, and a bracket you can't tap is a bracket nobody can act on.
   return (
-    <div className="w-56 rounded-sm border border-rule-strong bg-paper-raised shadow-sm">
+    <Link
+      to={`/matches/${match.id}`}
+      className="block w-56 rounded-sm border border-rule-strong bg-paper-raised shadow-sm transition-colors hover:border-tournament"
+    >
       <Competitor
         entryId={match.entryIds[0]}
         entries={entries}
@@ -89,7 +95,7 @@ function MatchCell({
         isWinner={winner === match.entryIds[1]}
         margin={match.result.margin}
       />
-    </div>
+    </Link>
   );
 }
 

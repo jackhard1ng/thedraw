@@ -7,6 +7,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, FieldValue, Timestamp, requireAuth, requireOrganizer, getUser } from './shared';
 import { finalizeMatch } from './matches';
 import { isValidMargin, loserOf } from './engine/scoring';
+import { notify } from './lib/notify';
 
 export const verifyHandicap = onCall<{ userId: string; source: 'ghin' | 'thirdParty' | 'self'; note?: string }>(async (req) => {
   const uid = requireAuth(req.auth);
@@ -59,11 +60,29 @@ export const resolveDispute = onCall<{ matchId: string; winnerEntryId: string; m
     'result.winnerEntryId': req.data.winnerEntryId,
     'result.margin': req.data.margin,
     'result.disputed': false,
+    // Permanent marker so the match page can say "ruled by an organizer" —
+    // clearing `disputed` alone would erase the history from view.
+    'result.resolvedByOrganizer': true,
   });
   await finalizeMatch(req.data.matchId, null);
   // Close any open dispute reports for this match.
   const reports = await db.collection('reports').where('targetType', '==', 'match').where('targetId', '==', req.data.matchId).where('status', '==', 'open').get();
   await Promise.all(reports.docs.map((d) => d.ref.update({ status: 'resolved' })));
+  // Both competitors hear the ruling — finalizeMatch already announced the
+  // final result; this names it as an organizer ruling, not an agreement.
+  for (const entryId of match.entryIds) {
+    if (!entryId) continue;
+    const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+    for (const u of e?.userIds ?? []) {
+      await notify({
+        userId: u,
+        title: 'Dispute ruled',
+        body: `An organizer reviewed the dispute and finalized the result (${req.data.margin}). The ruling is on the match page.`,
+        deadlineCritical: true,
+        link: `/matches/${req.data.matchId}`,
+      });
+    }
+  }
   return { ok: true };
 });
 

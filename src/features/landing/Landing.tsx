@@ -30,7 +30,7 @@ function LiveBoardTeaser() {
       collection(db, 'roundPosts'),
       where('marketId', '==', DEFAULT_MARKET_ID),
       where('status', 'in', ['open', 'full']),
-      orderBy('booking', 'desc'),
+      orderBy('booking', 'asc'), // "booked" sorts first — decisions above projects
       orderBy('createdAt', 'desc'),
       limit(3),
     );

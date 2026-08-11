@@ -14,6 +14,7 @@ import { DrawCard } from './DrawCard';
 import {
   applyFilters,
   DEFAULT_FILTERS,
+  useMyRounds,
   useRoundPosts,
   type BoardFilters,
 } from './useRoundPosts';
@@ -49,6 +50,7 @@ export function BoardPage() {
   const blockedIds = useBlockedIds(fbUser?.uid);
 
   const posts = useRoundPosts(marketId, blockedIds);
+  const myRounds = useMyRounds(fbUser?.uid);
   const [filters, setFilters] = useState<BoardFilters>(DEFAULT_FILTERS);
 
   const visible = useMemo(
@@ -61,6 +63,22 @@ export function BoardPage() {
       <div className="mb-4 flex items-baseline justify-between">
         <h1 className="text-2xl">The Board</h1>
       </div>
+
+      {/* Your own upcoming rounds — a drawn group is created FULL, and the
+          board's default filter hides full posts, so without this section your
+          own Saturday game would be invisible. */}
+      {myRounds && myRounds.length > 0 && (
+        <div className="mb-4">
+          <p className="mb-2 font-display uppercase tracking-wide text-xs text-ink-soft">
+            Your upcoming rounds
+          </p>
+          <div className="space-y-3">
+            {myRounds.map((p) => (
+              <RoundPostCard key={p.id} post={p} />
+            ))}
+          </div>
+        </div>
+      )}
 
       <DrawCard />
 

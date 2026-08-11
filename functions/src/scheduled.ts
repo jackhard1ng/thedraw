@@ -23,6 +23,7 @@ import { accountPayoutsEnabled, payout as stripePayout, stripeEnabled } from './
 export const tick = onSchedule('every 60 minutes', async () => {
   const now = Date.now();
   await closeDueTournaments(now);
+  await remindBeforeDeadlines(now);
   await enforceSchedulingDeadlines(now);
   await autoConfirmResults(now);
   await autoConfirmScorecards(now);
@@ -125,6 +126,43 @@ async function closeDueTournaments(now: number) {
   }
 }
 
+/**
+ * ~24h before a scheduling deadline, warn anyone who hasn't posted
+ * availability. The forfeit ladder must never fire on someone who was
+ * never reminded it exists (§P1).
+ */
+async function remindBeforeDeadlines(now: number) {
+  const windowEnd = Timestamp.fromMillis(now + 26 * 3_600_000);
+  const soon = await db
+    .collection('matches')
+    .where('status', '==', 'scheduling')
+    .where('scheduling.deadline', '<=', windowEnd)
+    .get();
+  for (const d of soon.docs) {
+    const m = d.data() as any;
+    if (m.deadlineReminderSent) continue;
+    const deadlineMs = (m.scheduling?.deadline as Timestamp | null)?.toMillis() ?? 0;
+    if (deadlineMs <= now) continue; // enforcement handles the past
+    const responded = new Set((m.scheduling?.availabilityLog ?? []).map((l: any) => l.entryId));
+    let sent = false;
+    for (const entryId of m.entryIds as string[]) {
+      if (!entryId || responded.has(entryId)) continue;
+      const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+      for (const u of e?.userIds ?? []) {
+        await notify({
+          userId: u,
+          title: 'Match deadline tomorrow',
+          body: 'Post at least 3 dates you can play before the deadline — no response counts as a forfeit.',
+          deadlineCritical: true,
+          link: `/matches/${d.id}`,
+        });
+        sent = true;
+      }
+    }
+    if (sent || responded.size >= 2) await d.ref.update({ deadlineReminderSent: true });
+  }
+}
+
 async function enforceSchedulingDeadlines(now: number) {
   const due = await db.collection('matches').where('status', '==', 'scheduling').where('scheduling.deadline', '<=', Timestamp.fromMillis(now)).get();
   for (const d of due.docs) {
@@ -147,8 +185,28 @@ async function enforceSchedulingDeadlines(now: number) {
       await forfeitMatch(d.id, loser, outcome.advancingEntryId, outcome.reason);
     } else if (outcome.kind === 'scheduleReady') {
       await d.ref.update({ 'scheduling.agreedTime': Timestamp.fromMillis(outcome.at), status: 'scheduled' });
+      // Silence picked the time (§P1) — both sides must hear WHICH time.
+      const when = new Date(outcome.at).toLocaleString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        timeZone: 'America/Chicago',
+      });
+      for (const id of entryIds) {
+        const e = (await db.doc(`entries/${id}`).get()).data() as any;
+        for (const u of e?.userIds ?? []) {
+          await notify({ userId: u, title: 'Match auto-scheduled', body: `The deadline passed with overlapping dates, so your match locked in at ${when}. Work out details in the match chat.`, deadlineCritical: true, link: `/matches/${d.id}` });
+        }
+      }
+    } else if (outcome.kind === 'noOverlap' && !m.noOverlapNoticeSent) {
+      // Dates on both sides but none shared: don't leave them staring at an
+      // expired deadline — point at the two ways out (extension / chat).
+      await d.ref.update({ noOverlapNoticeSent: true });
+      for (const id of entryIds) {
+        const e = (await db.doc(`entries/${id}`).get()).data() as any;
+        for (const u of e?.userIds ?? []) {
+          await notify({ userId: u, title: 'No overlapping dates', body: 'You both posted availability but nothing lines up. Use your extension or agree on a date in the match chat — an organizer steps in if it stays stuck.', deadlineCritical: true, link: `/matches/${d.id}` });
+        }
+      }
     }
-    // 'noOverlap' → leave for a self-serve extension / organizer escalation.
   }
 }
 
@@ -166,7 +224,16 @@ async function autoConfirmScorecards(now: number) {
   const touched = new Set<string>();
   for (const d of due.docs) {
     await d.ref.update({ status: 'complete', confirmedAt: Timestamp.fromMillis(now) });
-    touched.add((d.data() as any).tournamentId);
+    const sc = d.data() as any;
+    touched.add(sc.tournamentId);
+    if (sc.userId) {
+      await notify({
+        userId: sc.userId,
+        title: 'Score is official',
+        body: `Your round of ${sc.gross} auto-confirmed after 48h with no objection.`,
+        link: `/tournaments/${sc.tournamentId}/leaderboard`,
+      });
+    }
   }
   for (const tid of touched) await maybeCompleteTournament(tid);
 }

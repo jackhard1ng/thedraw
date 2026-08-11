@@ -39,6 +39,7 @@ import {
   useFormat,
   useTournament,
   useTournamentEntries,
+  useTournamentMatches,
 } from './useTournaments';
 import { PayoutGrid } from './PayoutGrid';
 import { RegistrationForm, type RegistrationValue } from './RegistrationForm';
@@ -136,6 +137,9 @@ export function TournamentDetailPage() {
   const { tournament, loading } = useTournament(id);
   const format = useFormat(tournament?.formatId);
   const entries = useTournamentEntries(id);
+  const matches = useTournamentMatches(
+    tournament?.status === 'inProgress' ? id : undefined,
+  );
 
   const [reg, setReg] = useState<RegistrationValue>({ partnerId: '', teamName: '' });
   const [busy, setBusy] = useState(false);
@@ -293,6 +297,42 @@ export function TournamentDetailPage() {
           )}
         </div>
       )}
+
+      {/* The player's live match — the single most important link on this page.
+          Every deadline in the forfeit ladder counts down on the other side of it. */}
+      {myEntry &&
+        (() => {
+          const live = (matches ?? []).find(
+            (m) =>
+              m.entryIds.includes(myEntry.id) &&
+              ['scheduling', 'scheduled', 'awaitingConfirmation'].includes(m.status),
+          );
+          if (!live) return null;
+          const needsAction =
+            live.status === 'scheduling' || live.status === 'awaitingConfirmation';
+          return (
+            <button
+              onClick={() => nav(`/matches/${live.id}`)}
+              className={`mt-4 flex w-full items-center justify-between rounded-sm border p-3 text-left ${
+                needsAction ? 'border-tournament bg-tournament/5' : 'border-rule-strong bg-paper-raised'
+              }`}
+            >
+              <span>
+                <span className="font-display uppercase tracking-wide text-sm text-ink">
+                  Your match
+                </span>
+                <span className="block text-xs text-ink-soft">
+                  {live.status === 'scheduling'
+                    ? 'Needs scheduling — post your availability before the deadline.'
+                    : live.status === 'scheduled'
+                      ? 'Scheduled — details and chat inside.'
+                      : 'A result is waiting on confirmation.'}
+                </span>
+              </span>
+              <span className="text-tournament">→</span>
+            </button>
+          );
+        })()}
 
       {/* Format + scoring, plain language */}
       <div className="mt-6">

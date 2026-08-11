@@ -72,11 +72,25 @@ export const useExtension = onCall<{ matchId: string }>(async (req) => {
   if (e.extensionUsed) throw new HttpsError('failed-precondition', 'You have already used your extension this tournament.');
 
   const base = match.scheduling.deadline?.toMillis() ?? Date.now();
+  const newDeadline = base + EXTENSION_DAYS * 86_400_000;
   await ref.update({
-    'scheduling.deadline': Timestamp.fromMillis(base + EXTENSION_DAYS * 86_400_000),
+    'scheduling.deadline': Timestamp.fromMillis(newDeadline),
     [`scheduling.extensionsUsed.${entryId}`]: true,
   });
   await eRef.update({ extensionUsed: true });
+  // The other side's clock just moved — tell them.
+  const other = match.entryIds.find((x) => x && x !== entryId);
+  if (other) {
+    const oe = (await db.doc(`entries/${other}`).get()).data() as { captainId: string } | undefined;
+    if (oe) {
+      await notify({
+        userId: oe.captainId,
+        title: 'Scheduling deadline extended',
+        body: `Your opponent used their one extension — the new deadline is ${new Date(newDeadline).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/Chicago' })}.`,
+        link: `/matches/${req.data.matchId}`,
+      });
+    }
+  }
   return { ok: true };
 });
 
@@ -90,13 +104,35 @@ export const setAgreedTime = onCall<{
   const ref = db.doc(`matches/${req.data.matchId}`);
   const match = (await ref.get()).data() as MatchDoc | undefined;
   if (!match) throw new HttpsError('not-found', 'Match not found.');
-  if (!(await actorEntry(match, uid))) throw new HttpsError('permission-denied', 'You are not in this match.');
+  const actor = await actorEntry(match, uid);
+  if (!actor) throw new HttpsError('permission-denied', 'You are not in this match.');
   await ref.update({
     'scheduling.agreedTime': Timestamp.fromMillis(req.data.agreedTime),
     'scheduling.placeId': req.data.placeId,
     'scheduling.bookedBy': req.data.bookedBy,
     status: 'scheduled',
   });
+  // Locking a time commits BOTH players — the other side gets a text, so a
+  // unilateral lock-in is never a surprise discovered at the course.
+  {
+    const when = new Date(req.data.agreedTime).toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      timeZone: 'America/Chicago',
+    });
+    const other = match.entryIds.find((x) => x && x !== actor);
+    if (other) {
+      const oe = (await db.doc(`entries/${other}`).get()).data() as { userIds: string[] } | undefined;
+      for (const u of oe?.userIds ?? []) {
+        await notify({
+          userId: u,
+          title: 'Match locked in',
+          body: `Your opponent locked ${when}. If that doesn't work, say so in the match chat now.`,
+          deadlineCritical: true,
+          link: `/matches/${req.data.matchId}`,
+        });
+      }
+    }
+  }
   // Record "committed" once per match so attendance ("played X of Y committed",
   // §4) is meaningful — it pairs 1:1 with the later played/noShow outcome.
   if (!(match as MatchDoc & { committedRecorded?: boolean }).committedRecorded) {
@@ -168,6 +204,24 @@ export const disputeResult = onCall<{ matchId: string; note: string }>(async (re
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string; name: string } | undefined;
   await ref.update({ 'result.disputed': true });
 
+  // Both sides hear it immediately: the disputer gets an acknowledgment, the
+  // reported side learns their result is contested — no black holes.
+  for (const entryId of match.entryIds) {
+    if (!entryId) continue;
+    const e = (await db.doc(`entries/${entryId}`).get()).data() as { captainId: string } | undefined;
+    if (!e) continue;
+    await notify({
+      userId: e.captainId,
+      title: e.captainId === uid ? 'Dispute filed' : 'Result disputed',
+      body:
+        e.captainId === uid
+          ? 'Your dispute went to the organizer with both records attached. The result is on hold until they rule.'
+          : 'Your opponent disputed the reported result. An organizer will review both sides and rule; the result is on hold.',
+      deadlineCritical: true,
+      link: `/matches/${req.data.matchId}`,
+    });
+  }
+
   // Credibility snapshot: a dispute is one player's word against another's, so
   // the report carries both track records — matches played, prior disputes
   // filed, membership age. EVIDENCE for the organizer, never an auto-verdict:
@@ -232,12 +286,23 @@ export async function finalizeMatch(matchId: string, confirmedBy: string | null)
   });
   if (loser) await db.doc(`entries/${loser}`).update({ status: 'eliminated' });
 
-  // Reputation: everyone who showed up played.
+  // Reputation: everyone who showed up played. And both sides are TOLD the
+  // result is final — especially the auto-confirm case, where silence did it.
   const now = Date.now();
+  const auto = confirmedBy === null;
   for (const entryId of match.entryIds) {
     if (!entryId) continue;
     const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
-    for (const u of e?.userIds ?? []) await writeReputation(u, 'played', matchId, now);
+    for (const u of e?.userIds ?? []) {
+      await writeReputation(u, 'played', matchId, now);
+      const won = entryId === winner;
+      await notify({
+        userId: u,
+        title: won ? 'Result final — you win' : 'Result final',
+        body: `${match.result?.margin ? `${match.result.margin}. ` : ''}${auto ? 'Confirmed automatically after 48h of silence. ' : ''}${won ? 'On to the next round if there is one.' : 'Tough one — your record and the bracket are updated.'}`,
+        link: `/matches/${matchId}`,
+      });
+    }
   }
 
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { bracketRounds?: number; structure: string } | undefined;
@@ -278,7 +343,28 @@ export async function forfeitMatch(
   if (forfeitedEntryId) {
     await db.doc(`entries/${forfeitedEntryId}`).update({ status: 'forfeited' });
     const fe = (await db.doc(`entries/${forfeitedEntryId}`).get()).data() as { userIds: string[] } | undefined;
-    for (const u of fe?.userIds ?? []) await writeReputation(u, 'forfeitNonResponse', matchId, now);
+    for (const u of fe?.userIds ?? []) {
+      await writeReputation(u, 'forfeitNonResponse', matchId, now);
+      await notify({
+        userId: u,
+        title: 'Match forfeited',
+        body: `${reason} You're out of this event, and the forfeit is on your record for a year — reply to deadlines to keep it clean.`,
+        deadlineCritical: true,
+        link: `/matches/${matchId}`,
+      });
+    }
+  }
+  {
+    const ae = (await db.doc(`entries/${advancingEntryId}`).get()).data() as { userIds: string[] } | undefined;
+    for (const u of ae?.userIds ?? []) {
+      await notify({
+        userId: u,
+        title: 'You advance',
+        body: `Your opponent forfeited (${reason.toLowerCase()}). Watch for your next-round pairing.`,
+        deadlineCritical: true,
+        link: `/matches/${matchId}`,
+      });
+    }
   }
 
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { bracketRounds?: number; structure: string } | undefined;
@@ -329,12 +415,29 @@ export const confirmRoundScore = onCall<{ scorecardId: string }>(async (req) => 
   const uid = requireAuth(req.auth);
   await requireActive(uid);
   const ref = db.doc(`scorecards/${req.data.scorecardId}`);
-  const sc = (await ref.get()).data() as { userId: string; status: string } | undefined;
+  const sc = (await ref.get()).data() as
+    | { userId: string; status: string; tournamentId: string; entryId: string }
+    | undefined;
   if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
-  // A playing partner attests — anyone in the field other than the scorer (§4 marker).
-  if (sc.userId === uid) throw new HttpsError('failed-precondition', 'A playing partner must confirm your card.');
+  if (sc.status !== 'awaitingConfirmation') {
+    throw new HttpsError('failed-precondition', 'This card is not awaiting confirmation.');
+  }
+  // A playing partner attests — someone IN THE FIELD other than the scorer's
+  // own entry (§4 marker). A random account confirming a stranger's card is
+  // exactly the attack the witness rule exists to stop.
+  const confirmerEntries = await db
+    .collection('entries')
+    .where('tournamentId', '==', sc.tournamentId)
+    .where('userIds', 'array-contains', uid)
+    .limit(1)
+    .get();
+  if (confirmerEntries.empty) {
+    throw new HttpsError('permission-denied', 'Only players in this event can confirm a card.');
+  }
+  if (confirmerEntries.docs[0].id === sc.entryId) {
+    throw new HttpsError('failed-precondition', 'A playing partner must confirm your card — not your own side.');
+  }
   await ref.update({ status: 'complete', confirmedBy: uid, confirmedAt: Timestamp.now() });
-  const scData = (await ref.get()).data() as { tournamentId: string };
-  await maybeCompleteTournament(scData.tournamentId);
+  await maybeCompleteTournament(sc.tournamentId);
   return { ok: true };
 });

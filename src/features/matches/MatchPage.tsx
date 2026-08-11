@@ -323,7 +323,12 @@ export function MatchPage() {
   const log = match.scheduling.availabilityLog;
   const submittedEntryIds = new Set(log.map((l) => l.entryId));
   const quiet = match.entryIds.filter((eid) => !submittedEntryIds.has(eid));
-  const myExtensionUsed = youEntry ? match.scheduling.extensionsUsed?.[youEntry.id] : true;
+  // The server gates ONE extension per tournament (on the entry), not per
+  // match — mirroring that here keeps the button from appearing in round 2
+  // only to error on tap.
+  const myExtensionUsed = youEntry
+    ? ((youEntry as { extensionUsed?: boolean }).extensionUsed ?? false)
+    : true;
 
   // Overlapping days between the two availability logs → candidate agreed times.
   const overlapTimes: number[] = (() => {
@@ -347,8 +352,19 @@ export function MatchPage() {
     match.status === 'complete'
       ? `${entryName(match.result.winnerEntryId ?? '')} won ${match.result.margin ?? ''}`.trim()
       : match.status === 'forfeited'
-        ? `Forfeited${match.forfeitReason ? ` — ${match.forfeitReason}` : ''}`
+        ? `${match.forfeitedBy ? `${entryName(match.forfeitedBy)} forfeited` : 'Forfeited'} — ${entryName(match.result.winnerEntryId ?? '')} advances${match.forfeitReason ? `. ${match.forfeitReason}` : ''}`
         : 'Voided — weather';
+
+  const STATUS_LABEL: Record<string, string> = {
+    pendingOpponent: 'Waiting on an opponent',
+    scheduling: 'Scheduling',
+    scheduled: 'Scheduled',
+    awaitingResult: 'Awaiting result',
+    awaitingConfirmation: match.result?.disputed ? 'Disputed — on hold' : 'Awaiting confirmation',
+    complete: 'Final',
+    forfeited: 'Forfeited',
+    voidedWeather: 'Voided — weather',
+  };
 
   // submittedBy is an ENTRY id, not a uid — compare against my entry.
   const iSubmitted = !!youEntry && match.result.submittedBy === youEntry.id;
@@ -359,7 +375,20 @@ export function MatchPage() {
         ← Back
       </button>
 
-      {/* Pre-match education card */}
+      {/* Pre-match education card — only once BOTH competitors exist. Against a
+          TBD slot it would invent "Opponent: 0.0 — you get 8 strokes". */}
+      {match.status === 'pendingOpponent' || twoEntries.length < 2 ? (
+        <Card className="p-5">
+          <p className="font-display uppercase tracking-wide text-ink">
+            Waiting on your opponent
+          </p>
+          <p className="mt-2 text-sm text-ink-soft">
+            The other side of the draw hasn't finished. You'll get a text the
+            moment your opponent is set — the 48-hour scheduling clock starts
+            then, not before.
+          </p>
+        </Card>
+      ) : (
       <Card className="border-tournament/40 p-5">
         <p className="font-display uppercase tracking-wide text-tournament">
           {card.heading}
@@ -377,10 +406,11 @@ export function MatchPage() {
         <Rule className="my-3" />
         <p className="text-sm text-ink-soft">{card.primer}</p>
       </Card>
+      )}
 
       <div className="mt-4 flex items-center justify-between">
         <Badge tone={match.status === 'complete' ? 'tournament' : 'neutral'}>
-          {match.status}
+          {STATUS_LABEL[match.status] ?? match.status}
         </Badge>
         {tournament && (
           <span className="text-xs text-ink-faint">{tournament.name}</span>
@@ -400,6 +430,14 @@ export function MatchPage() {
                   {relativeDays(match.scheduling.deadline)}
                 </span>
               </div>
+              {/* The ladder, stated BEFORE it bites (§P1): what the deadline
+                  does, spelled out where the deadline is shown. */}
+              <p className="mt-2 border-t border-rule pt-2 text-xs text-ink-faint">
+                Post at least 3 dates you can play. At the deadline: no response
+                = forfeit; both silent = higher seed advances; overlapping dates
+                = the match locks in automatically. One 3-day extension per
+                tournament.
+              </p>
             </div>
 
             <div>
@@ -428,6 +466,10 @@ export function MatchPage() {
               <div>
                 <p className="mb-2 font-display uppercase tracking-wide text-xs text-pine">
                   Overlapping times — lock one in
+                </p>
+                <p className="mb-2 text-xs text-ink-faint">
+                  Tapping Set commits both players immediately — your opponent
+                  gets a text with the time.
                 </p>
                 <div className="space-y-2">
                   {overlapTimes.map((ms) => (
@@ -472,7 +514,7 @@ export function MatchPage() {
                   }
                 }}
               >
-                Use my one 48h extension
+                Use my one extension (+3 days, once per tournament)
               </Button>
             )}
           </div>
@@ -577,13 +619,30 @@ export function MatchPage() {
               Reported: {entryName(match.result.winnerEntryId ?? '')} won{' '}
               <Num>{match.result.margin}</Num>.
             </div>
-            <CommitteeNote />
-            {myEntry && !iSubmitted ? (
-              <ConfirmDispute matchId={match.id} onError={setError} />
+            {match.result.disputed ? (
+              // A filed dispute HOLDS the result — the 48h auto-confirm copy
+              // would be a lie here, and the disputer needs to see it landed.
+              <div className="rounded-sm border border-tournament/30 bg-tournament/10 p-3 text-sm">
+                <p className="font-display uppercase tracking-wide text-xs text-tournament">
+                  Disputed — on hold
+                </p>
+                <p className="mt-1 text-ink-soft">
+                  The dispute went to the market organizer with both players'
+                  records attached. Nothing auto-confirms while they review;
+                  you'll both be notified of the ruling.
+                </p>
+              </div>
             ) : (
-              <p className="text-sm text-ink-faint">
-                Waiting for your opponent to confirm. Silence auto-confirms in 48h.
-              </p>
+              <>
+                <CommitteeNote />
+                {myEntry && !iSubmitted ? (
+                  <ConfirmDispute matchId={match.id} onError={setError} />
+                ) : (
+                  <p className="text-sm text-ink-faint">
+                    Waiting for your opponent to confirm. Silence auto-confirms in 48h.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -603,7 +662,7 @@ export function MatchPage() {
                 View scorecard
               </a>
             )}
-            {match.result.disputed && (
+            {(match.result.disputed || (match.result as { resolvedByOrganizer?: boolean }).resolvedByOrganizer) && (
               <p className="mt-2 text-xs text-ink-soft">This result was disputed and ruled by an organizer.</p>
             )}
           </div>

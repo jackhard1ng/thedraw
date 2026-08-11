@@ -26,6 +26,8 @@ import { notify } from './lib/notify';
 // 1 + 2 — the hourly sweep (called from scheduled.tick)
 // ---------------------------------------------------------------------------
 export async function boardSweep(now: number) {
+  await sweepTargetDatedPosts(now);
+
   // Fixed-time posts whose tee time has passed and are still open/full.
   const due = await db
     .collection('roundPosts')
@@ -73,6 +75,72 @@ export async function boardSweep(now: number) {
         standingOriginId: (src.standingOriginId as string | undefined) ?? d.id,
       });
     }
+  }
+}
+
+/**
+ * Draw-group lifecycle. Draw posts are flexible (no fixed time) and carry a
+ * `targetDate` — the actual day the group was drawn for. Without this sweep a
+ * group whose booker never confirms would sit "full / needs booking" forever:
+ *   - ~36h out, still unbooked → nudge the booker (SMS) once.
+ *   - target date passed, still unbooked → close it quietly and invite
+ *     everyone back into next week's draw. No score nudges for a round that
+ *     never happened, and no reputation marks — nobody stood anyone up.
+ * (Booked draw posts get a fixed time via confirmTeeTime and complete through
+ * the normal fixed-time path above.)
+ */
+async function sweepTargetDatedPosts(now: number) {
+  const posts = await db
+    .collection('roundPosts')
+    .where('status', 'in', ['open', 'full'])
+    .where('targetDate', '<=', Timestamp.fromMillis(now + 36 * 3_600_000))
+    .get();
+  for (const d of posts.docs) {
+    const p = d.data() as {
+      createdBy: string;
+      joinedUserIds: string[];
+      booking: string;
+      title: string | null;
+      targetDate: Timestamp;
+      bookerNudgeSent?: boolean;
+      timing: { fixedTime: Timestamp | null };
+    };
+    if (p.booking !== 'needsBooking' || p.timing.fixedTime) continue;
+    const targetMs = p.targetDate.toMillis();
+
+    if (targetMs <= now) {
+      await d.ref.update({ status: 'completed' });
+      for (const u of [p.createdBy, ...p.joinedUserIds]) {
+        await notify({
+          userId: u,
+          title: 'Group closed — no tee time',
+          body: 'The day came and went without a confirmed tee time, so the group was closed. If you played anyway, log the round; either way the next draw is one tap.',
+          link: '/',
+        });
+      }
+    } else if (!p.bookerNudgeSent) {
+      await d.ref.update({ bookerNudgeSent: true });
+      await notify({
+        userId: p.createdBy,
+        title: "You're the booker — lock it in",
+        body: `${p.title ?? 'Your round'} is coming up and no tee time is confirmed. Book one and hit "Confirm the tee time" so your group gets locked in.`,
+        deadlineCritical: true,
+        link: `/post/${d.id}`,
+      });
+    }
+  }
+
+  // Flexible posts with no target date (member-created "some Saturday" posts)
+  // can't linger forever either — close them quietly after 14 days.
+  const stale = await db
+    .collection('roundPosts')
+    .where('status', 'in', ['open', 'full'])
+    .where('createdAt', '<=', Timestamp.fromMillis(now - 14 * 86_400_000))
+    .get();
+  for (const d of stale.docs) {
+    const p = d.data() as { timing: { fixedTime: Timestamp | null }; targetDate?: Timestamp };
+    if (p.timing.fixedTime || p.targetDate) continue; // handled by other paths
+    await d.ref.update({ status: 'completed' });
   }
 }
 

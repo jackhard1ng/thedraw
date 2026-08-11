@@ -332,6 +332,7 @@ export interface Award {
 // matches/{matchId}
 // ---------------------------------------------------------------------------
 export type MatchStatus =
+  | 'pendingOpponent' // a later-round slot waiting on the other semifinal etc.
   | 'scheduling'
   | 'scheduled'
   | 'awaitingResult'

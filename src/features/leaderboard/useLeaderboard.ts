@@ -23,6 +23,8 @@ import type { Course } from '@/types/models';
 export interface BuiltInput extends LbInput {
   thru: string;
   diffs: (string | null)[];
+  /** True while any counted round is still awaiting a partner's confirmation. */
+  provisional: boolean;
 }
 
 export interface LeaderboardData {
@@ -123,6 +125,7 @@ export function useLeaderboard(tournamentId: string): LeaderboardData {
         pars,
         thru: played === 0 ? '–' : played === roundCount ? 'F' : String(played),
         diffs,
+        provisional: cards.some((s) => s.status === 'awaitingConfirmation'),
       } satisfies BuiltInput;
     });
 
