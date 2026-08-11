@@ -245,6 +245,82 @@ function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts
 }
 
 /**
+ * The member-facing path to the green badge. One tap files a request into the
+ * organizer's queue; the button reflects the open request so nobody wonders
+ * whether "have an organizer verify it" actually went anywhere.
+ */
+function VerificationRequest({
+  userId,
+  marketId,
+  displayName,
+  ghinNumber,
+  sourceUrl,
+}: {
+  userId: string;
+  marketId: string;
+  displayName: string;
+  ghinNumber: string | null;
+  sourceUrl: string | null;
+}) {
+  const [state, setState] = useState<'idle' | 'busy' | 'requested'>('idle');
+  useEffect(() => {
+    const q = query(
+      collection(db, 'verificationRequests'),
+      where('userId', '==', userId),
+      where('status', '==', 'open'),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setState((s) => (snap.empty ? (s === 'requested' ? 'idle' : s) : 'requested')),
+      () => undefined,
+    );
+  }, [userId]);
+
+  async function request() {
+    setState('busy');
+    try {
+      const { addDoc, serverTimestamp } = await import('firebase/firestore');
+      await addDoc(collection(db, 'verificationRequests'), {
+        userId,
+        marketId,
+        displayName,
+        ghinNumber,
+        sourceUrl,
+        status: 'open',
+        createdAt: serverTimestamp(),
+      });
+      setState('requested');
+    } catch {
+      setState('idle');
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-rule pt-3">
+      <p className="text-xs text-ink-faint">
+        A verified index earns the green badge and unlocks money events.
+        {!ghinNumber && !sourceUrl && ' Add a GHIN number or record link first for a faster check.'}
+      </p>
+      {state === 'requested' ? (
+        <p className="mt-2 text-xs text-pine">
+          Verification requested — the market organizer checks your record and
+          you'll get a notification when it's done.
+        </p>
+      ) : (
+        <Button
+          variant="ghost"
+          className="mt-2 px-3 py-1.5 text-xs"
+          disabled={state === 'busy'}
+          onClick={request}
+        >
+          {state === 'busy' ? '…' : 'Request verification'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
  * Texts are the deadline-critical channel — a Google-sign-in user has no phone
  * on file, so this row lets them add one (and anyone correct theirs).
  */
@@ -441,11 +517,14 @@ export function ProfilePage() {
             )}
           </div>
         </div>
-        {profile.handicap.source === 'self' && (
-          <p className="mt-3 text-xs text-ink-faint">
-            Self-declared. Have an organizer verify a GHIN or linked record to
-            earn a green badge and unlock money events.
-          </p>
+        {!profile.handicap.verifiedAt && (
+          <VerificationRequest
+            userId={fbUser.uid}
+            marketId={profile.marketId}
+            displayName={profile.displayName}
+            ghinNumber={profile.handicap.ghinNumber}
+            sourceUrl={profile.handicap.sourceUrl}
+          />
         )}
       </Card>
 

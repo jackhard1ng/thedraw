@@ -55,23 +55,31 @@ export function checkEligibility(
   }
 
   if (e.requiresCompleteProfile && !profileComplete(user)) {
-    reasons.push('Complete your profile (real name, age 18+, verified index).');
+    // The check is identity only — saying "verified index" here would send
+    // people chasing the wrong fix (index verification is its own gate below).
+    reasons.push('Complete your profile (real name, age 18+).');
   }
 
   if (e.requiresVerifiedIndex && user.handicap.source === 'self') {
-    reasons.push('A verified handicap index is required.');
+    reasons.push(
+      'A verified handicap index is required — request verification from the Handicap section of your profile.',
+    );
   }
 
   if (e.requiresGhinVerified && user.handicap.source !== 'ghin') {
     reasons.push('This event requires a GHIN-verified index.');
   }
 
-  // Freshness only matters where the index matters (mirrors the server rule).
-  if (e.requiresVerifiedIndex && e.maxHandicapVerificationAgeDays != null) {
+  // Freshness only matters where the index matters (mirrors the server rule) —
+  // and only for an index that HAS been verified. A never-verified index is
+  // already covered above; "re-verify (expired)" would be nonsense for it.
+  if (
+    e.requiresVerifiedIndex &&
+    e.maxHandicapVerificationAgeDays != null &&
+    user.handicap.verifiedAt != null
+  ) {
     const fresh = freshness(user.handicap.verifiedAt, now);
-    const days = user.handicap.verifiedAt
-      ? (now - user.handicap.verifiedAt.toMillis()) / 86_400_000
-      : Infinity;
+    const days = (now - user.handicap.verifiedAt.toMillis()) / 86_400_000;
     if (days > e.maxHandicapVerificationAgeDays) {
       reasons.push(
         `Re-verify your handicap — must be within the last ${e.maxHandicapVerificationAgeDays} days (${fresh}).`,

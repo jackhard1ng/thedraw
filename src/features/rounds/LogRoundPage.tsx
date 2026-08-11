@@ -75,6 +75,8 @@ export function LogRoundPage() {
       <SectionHeader>Log a round</SectionHeader>
       <p className="mb-6 text-sm text-ink-soft">
         A quick record for your card. Kept separate from your verified index.
+        Only rounds played through a board post can be attested by your group —
+        and attested rounds are what count toward money-event eligibility.
       </p>
 
       <div className="space-y-5">

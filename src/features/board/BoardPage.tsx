@@ -151,9 +151,12 @@ export function BoardPage() {
         </div>
       )}
 
+      {/* Floats ABOVE the bottom nav (nav is ~49px + safe-area at z-30) —
+          the primary day-one action must never be half-covered by chrome. */}
       <Link
         to="/post/new"
-        className="fixed inset-x-0 bottom-6 z-20 mx-auto block w-fit"
+        className="fixed inset-x-0 z-40 mx-auto block w-fit"
+        style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
       >
         <Button variant="primary" className="shadow-lg">
           + Post a round

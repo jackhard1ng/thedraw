@@ -37,16 +37,25 @@ export function ChatThread({ threadId }: { threadId: string }) {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  const [sendError, setSendError] = useState<string | null>(null);
+
   async function send() {
     const body = text.trim();
     if (!body || !fbUser) return;
     setText('');
-    await addDoc(collection(db, 'threads', threadId, 'messages'), {
-      authorId: fbUser.uid,
-      authorName: profile?.displayName ?? 'Player',
-      text: body,
-      createdAt: serverTimestamp(),
-    });
+    setSendError(null);
+    try {
+      await addDoc(collection(db, 'threads', threadId, 'messages'), {
+        authorId: fbUser.uid,
+        authorName: profile?.displayName ?? 'Player',
+        text: body,
+        createdAt: serverTimestamp(),
+      });
+    } catch {
+      // A rejected write must not eat the message — restore it for retry.
+      setText(body);
+      setSendError("Message didn't send — check your connection and try again.");
+    }
   }
 
   return (
@@ -90,6 +99,7 @@ export function ChatThread({ threadId }: { threadId: string }) {
           Send
         </Button>
       </div>
+      {sendError && <p className="mt-1 text-xs text-tournament">{sendError}</p>}
     </div>
   );
 }

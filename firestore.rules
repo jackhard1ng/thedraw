@@ -218,5 +218,16 @@ service cloud.firestore {
       allow create: if isActive() && request.resource.data.requestedBy == request.auth.uid;
       allow update, delete: if false;
     }
+
+    // Handicap verification requests — the member-facing path to the green
+    // badge. A member files their own; the market organizer works the queue;
+    // resolution happens in the verifyHandicap function.
+    match /verificationRequests/{id} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid
+            || isOrganizerOf(resource.data.marketId));
+      allow create: if isActive() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
   }
 }

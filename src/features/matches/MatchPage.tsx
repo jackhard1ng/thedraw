@@ -583,7 +583,7 @@ export function MatchPage() {
                   onClick={async () => {
                     if (
                       !window.confirm(
-                        'Cancel this tee time?\n\n· More than 72h out: full refund, back to scheduling (one free per season)\n· 24–72h out: refund only if the slot re-fills\n· Under 24h: no refund — the match is forfeited',
+                        'Cancel this tee time?\n\n· More than 72h out: free reschedule (one per season), green fees collected through The Draw refunded\n· 24–72h out: reschedule with a late-cancel mark on your record; app-collected green fees refunded\n· Under 24h: the match is forfeited to your opponent\n\nGreen fees paid directly to the course follow the course’s own policy.',
                       )
                     )
                       return;

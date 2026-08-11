@@ -19,6 +19,7 @@ interface Template {
   name: string;
   formatId: string;
   fieldSize: number;
+  fieldSizeMin?: number; // runs at this many; caps at fieldSize
   entryFeeMinCents: number;
   entryFeeMaxCents: number;
   allowedPayoutShapes: string[];
@@ -194,8 +195,16 @@ export function InstantEventPage() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-ink-faint">
-                At a full field of <Num>{tpl.fieldSize}</Num>. Charged only if the
-                field fills.
+                At a full field of <Num>{tpl.fieldSize}</Num>.{' '}
+                {tpl.fieldSizeMin && tpl.fieldSizeMin < tpl.fieldSize ? (
+                  <>
+                    Runs at <Num>{tpl.fieldSizeMin}</Num>+ players — cards are
+                    charged only if the event runs, and the purse scales with
+                    the field.
+                  </>
+                ) : (
+                  <>Charged only if the field fills.</>
+                )}
               </p>
             </Card>
           )}

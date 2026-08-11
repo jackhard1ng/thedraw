@@ -259,16 +259,28 @@ async function weatherSweep(now: number) {
       const rainMm = w.rain?.['1h'] ?? 0;
       const dangerous = conditions.includes('thunderstorm') || rainMm > 7.6;
       if (dangerous) {
-        await d.ref.update({ status: 'voidedWeather', 'scheduling.agreedTime': null });
+        // App-collected green fees refund on a weather void — "void + refund"
+        // must mean refund. Course-side fees follow the course's own policy.
+        const { refundGreenFees } = await import('./greenfees');
+        await refundGreenFees(d.id, m);
+        // One update, straight back to scheduling with a fresh window and a
+        // CLEAR availability log — stale dates must not re-lock the rained-out
+        // day at the next deadline pass.
+        await d.ref.update({
+          status: 'scheduling',
+          weatherVoided: true,
+          greenFees: null,
+          'scheduling.agreedTime': null,
+          'scheduling.availabilityLog': [],
+          'scheduling.deadline': Timestamp.fromMillis(now + 2 * 86_400_000),
+        });
         const entryIds = m.entryIds as [string, string];
         for (const id of entryIds) {
           const e = (await db.doc(`entries/${id}`).get()).data() as any;
           for (const u of e?.userIds ?? []) {
-            await notify({ userId: u, title: 'Match voided — weather', body: 'Dangerous weather at your course. The match is voided and back to scheduling; reschedule when you can.', deadlineCritical: true, link: `/matches/${d.id}` });
+            await notify({ userId: u, title: 'Match voided — weather', body: 'Dangerous weather at your course. The tee time is voided (green fees collected through The Draw are refunded) and the match is back to scheduling — post fresh dates.', deadlineCritical: true, link: `/matches/${d.id}` });
           }
         }
-        // Back to scheduling with a fresh window.
-        await d.ref.update({ status: 'scheduling', 'scheduling.deadline': Timestamp.fromMillis(now + 2 * 86_400_000) });
       }
     } catch (e) {
       console.error(`weather check failed for ${d.id}: ${(e as Error).message}`);

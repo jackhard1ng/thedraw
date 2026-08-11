@@ -161,8 +161,20 @@ export const cancelScheduledMatch = onCall<{ matchId: string }>(async (req) => {
   const teeMs = (m.scheduling?.agreedTime as Timestamp | null)?.toMillis() ?? 0;
   const hoursOut = (teeMs - Date.now()) / H;
 
+  // Both reschedule branches tell the opponent — a vanished tee time with no
+  // notice is exactly the flake experience this app exists to prevent.
+  async function notifyOpponent(body: string) {
+    const other = m.entryIds.find((x: string) => x && x !== myEntryId);
+    if (!other) return;
+    const oe = (await db.doc(`entries/${other}`).get()).data() as { userIds: string[] } | undefined;
+    for (const u of oe?.userIds ?? []) {
+      await notify({ userId: u, title: 'Tee time cancelled', body, deadlineCritical: true, link: `/matches/${req.data.matchId}` });
+    }
+  }
+
   if (hoursOut > 72) {
-    // Full refund, back to scheduling — ONE free reschedule per season per entry.
+    // Free reschedule — ONE per season per entry, and genuinely free: any
+    // app-collected green fees refund in full and NO reputation mark.
     const eRef = db.doc(`entries/${myEntryId}`);
     const e = (await eRef.get()).data() as { seasonRescheduleUsed?: boolean };
     if (e.seasonRescheduleUsed) {
@@ -176,21 +188,25 @@ export const cancelScheduledMatch = onCall<{ matchId: string }>(async (req) => {
       'scheduling.deadline': Timestamp.fromMillis(Date.now() + 48 * H),
       greenFees: null,
     });
-    await writeReputation(uid, 'lateCancel', req.data.matchId, Date.now());
+    await notifyOpponent('Your opponent used their free reschedule (72h+ notice). Back to scheduling — post fresh dates.');
     return { ok: true, outcome: 'rescheduled' };
   }
 
   if (hoursOut >= 24) {
-    // Refund only if the slot re-fills or the course releases — recorded as
-    // pending; the booker attests the outcome. The match still voids now.
+    // Late reschedule: the match goes back to scheduling, app-collected green
+    // fees refund (course fees are between booker and course), and the
+    // canceller takes a late-cancel mark. Deterministic — no pending states
+    // waiting on an attestation flow that doesn't exist.
+    await refundGreenFees(req.data.matchId, m);
     await mRef.update({
       status: 'scheduling',
       'scheduling.agreedTime': null,
       'scheduling.deadline': Timestamp.fromMillis(Date.now() + 48 * H),
-      ...(m.greenFees ? { 'greenFees.refundPending': true } : {}),
+      greenFees: null,
     });
     await writeReputation(uid, 'lateCancel', req.data.matchId, Date.now());
-    return { ok: true, outcome: 'refundPending' };
+    await notifyOpponent('Your opponent cancelled 24–72h out (late-cancel on their record). Back to scheduling — post fresh dates.');
+    return { ok: true, outcome: 'rescheduled-late' };
   }
 
   // <24h — no refund, match forfeited by the canceller (§P1: deterministic).
@@ -199,7 +215,7 @@ export const cancelScheduledMatch = onCall<{ matchId: string }>(async (req) => {
   return { ok: true, outcome: 'forfeited' };
 });
 
-async function refundGreenFees(matchId: string, m: any) {
+export async function refundGreenFees(matchId: string, m: any) {
   if (!m.greenFees?.collectedAt || !stripeEnabled()) return;
   const stripe = getStripe();
   const rows = await db.collection('ledger').where('matchId', '==', matchId).where('type', '==', 'greenFee').get();
@@ -207,7 +223,10 @@ async function refundGreenFees(matchId: string, m: any) {
     const r = d.data() as { stripeRef: string; amountCents: number; fromUserId: string | null };
     try {
       const re = await stripe.refunds.create({ payment_intent: r.stripeRef });
-      await writeLedger({ type: 'refund', amountCents: r.amountCents, fromUserId: null, toUserId: r.fromUserId, tournamentId: null, matchId, stripeRef: re.id, note: 'green fee refund (>72h cancel)' });
+      await writeLedger({ type: 'refund', amountCents: r.amountCents, fromUserId: null, toUserId: r.fromUserId, tournamentId: null, matchId, stripeRef: re.id, note: 'green fee refund (cancel/void)' });
+      if (r.fromUserId) {
+        await notify({ userId: r.fromUserId, title: 'Green fee refunded', body: `$${(r.amountCents / 100).toFixed(2)} is on its way back to your card.`, link: `/matches/${matchId}` });
+      }
     } catch (e) {
       console.error(`green fee refund failed: ${(e as Error).message}`);
     }

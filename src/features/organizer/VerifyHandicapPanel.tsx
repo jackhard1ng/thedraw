@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Card, Field, Num, SectionHeader } from '@/components/ui';
@@ -28,6 +28,80 @@ import type { HandicapSource, Match, UserStatus } from '@/types/models';
 function ActionResult({ msg }: { msg: string | null }) {
   if (!msg) return null;
   return <p className="mt-2 text-sm text-pine">{msg}</p>;
+}
+
+interface VReq {
+  id: string;
+  userId: string;
+  displayName: string;
+  ghinNumber: string | null;
+  sourceUrl: string | null;
+}
+
+/** Members' open verification requests — one tap verifies and closes them. */
+function VerificationQueue({ marketId }: { marketId: string }) {
+  const [reqs, setReqs] = useState<VReq[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'verificationRequests'),
+      where('marketId', '==', marketId),
+      where('status', '==', 'open'),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setReqs(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<VReq, 'id'>) }))),
+      () => setReqs([]),
+    );
+  }, [marketId]);
+
+  if (!reqs || reqs.length === 0) return null;
+  return (
+    <div className="mb-8">
+      <SectionHeader>
+        Verification requests <Num className="text-tournament">{reqs.length}</Num>
+      </SectionHeader>
+      <div className="space-y-2">
+        {reqs.map((r) => (
+          <Card key={r.id} className="flex items-center justify-between p-3 text-sm">
+            <div className="min-w-0">
+              <p className="truncate text-ink">{r.displayName}</p>
+              <p className="text-xs text-ink-faint">
+                {r.ghinNumber
+                  ? `GHIN ${r.ghinNumber}`
+                  : r.sourceUrl
+                    ? r.sourceUrl
+                    : 'No record attached — self-declared'}
+              </p>
+            </div>
+            <Button
+              variant="primary"
+              className="shrink-0 px-3 py-1.5 text-xs"
+              disabled={busyId === r.id}
+              onClick={async () => {
+                setBusyId(r.id);
+                setErr(null);
+                try {
+                  await verifyHandicap({
+                    userId: r.userId,
+                    source: r.ghinNumber ? 'ghin' : r.sourceUrl ? 'thirdParty' : 'self',
+                  });
+                } catch (e) {
+                  setErr((e as Error).message);
+                } finally {
+                  setBusyId(null);
+                }
+              }}
+            >
+              {busyId === r.id ? '…' : 'Verify'}
+            </Button>
+          </Card>
+        ))}
+      </div>
+      {err && <p className="mt-2 text-sm text-tournament">{err}</p>}
+    </div>
+  );
 }
 
 function DisputeCard({
@@ -159,6 +233,8 @@ export function VerifyHandicapPanel() {
       <button onClick={() => nav('/organizer')} className="btn-quiet mb-4 px-0">
         ← Organizer
       </button>
+
+      <VerificationQueue marketId={marketId} />
 
       <SectionHeader>Verify handicap</SectionHeader>
       <div className="space-y-3">

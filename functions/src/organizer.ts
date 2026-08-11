@@ -18,6 +18,20 @@ export const verifyHandicap = onCall<{ userId: string; source: 'ghin' | 'thirdPa
     'handicap.verifiedAt': FieldValue.serverTimestamp(),
     'handicap.verifiedBy': uid,
   });
+  // Close any open request this verification answers, and tell the player —
+  // the green badge is the key that unlocks money events.
+  const open = await db
+    .collection('verificationRequests')
+    .where('userId', '==', req.data.userId)
+    .where('status', '==', 'open')
+    .get();
+  await Promise.all(open.docs.map((d) => d.ref.update({ status: 'resolved', resolvedBy: uid })));
+  await notify({
+    userId: req.data.userId,
+    title: 'Handicap verified',
+    body: 'An organizer verified your index — the green badge is on your card and money events are open to you.',
+    link: '/me',
+  });
   return { ok: true };
 });
 

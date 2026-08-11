@@ -190,7 +190,14 @@ export function TournamentDetailPage() {
   const item = itemizeEntry(tournament.entryFeeCents, tournament.adminFeePercent);
   const field = tournament.entryIds?.length ?? 0;
   const full = field >= tournament.maxEntries;
-  const projectedPool = item.prizeCents * Math.max(field, tournament.minEntries);
+  // Mirror the server's pool math exactly, INCLUDING the $10 event minimum —
+  // a projection bigger than the real payout is a broken promise.
+  const projectedN = Math.max(field, tournament.minEntries);
+  const projectedShortfall =
+    tournament.adminFeePercent > 0
+      ? Math.max(0, 1000 - item.adminCents * projectedN)
+      : 0;
+  const projectedPool = Math.max(0, item.prizeCents * projectedN - projectedShortfall);
 
   // Derived stats — real where cheap, permissive otherwise (courtesy only).
   const derived: DerivedStats | null = profile
@@ -361,8 +368,9 @@ export function TournamentDetailPage() {
         />
         {!free && (
           <p className="mt-1 text-xs text-ink-faint">
-            Projected at the current field of <Num>{Math.max(field, tournament.minEntries)}</Num>.
+            Projected at the current field of <Num>{projectedN}</Num>.
             Purses are a percentage of the prize fund and grow with the field.
+            Ties split the combined shares of the tied places evenly.
           </p>
         )}
         {tournament.prizeType === 'sponsoredPrizes' && tournament.sponsoredPrizes && (

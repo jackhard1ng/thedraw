@@ -7,7 +7,7 @@
  * format "open", booking "needsBooking".
  */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   addDoc,
   collection,
@@ -52,9 +52,12 @@ export function CreatePostPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A past tee time would "complete" on the next sweep and nudge everyone to
+  // log a round that never happened — future times only.
+  const timeInFuture = !fixedTime || new Date(fixedTime).getTime() > Date.now();
   const timingValid =
-    (timingMode === 'fixed' && !!fixedTime) ||
-    (timingMode === 'window' && !!fixedTime) ||
+    (timingMode === 'fixed' && !!fixedTime && timeInFuture) ||
+    (timingMode === 'window' && !!fixedTime && timeInFuture) ||
     (timingMode === 'flexible' && flexibleDays.length > 0);
   const valid = timingValid && slotsTotal >= 1;
 
@@ -299,9 +302,10 @@ export function CreatePostPage() {
                 <p className="mt-2 text-ink">
                   Heads up: cash at the course means settling up is on you two.
                   Run it as an{' '}
-                  <a href="/tournaments/new-game" className="text-tournament underline underline-offset-2">
+                  {/* Link, not <a> — a full page load would wipe the half-filled form. */}
+                  <Link to="/tournaments/new-game" className="text-tournament underline underline-offset-2">
                     official match
-                  </a>{' '}
+                  </Link>{' '}
                   instead and both entries are collected before you tee off — the
                   winner is paid automatically, nobody has to ask.
                 </p>

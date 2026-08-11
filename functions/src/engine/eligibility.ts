@@ -72,10 +72,13 @@ export function checkEligibility(
     reasons.push('This event requires a GHIN-verified index.');
   }
   // Freshness only matters where the index matters — an open gross event
-  // doesn't care how stale (or absent) a handicap record is.
+  // doesn't care how stale (or absent) a handicap record is. And only a
+  // once-verified index can be "re-verified"; a never-verified one is already
+  // rejected above, and a second reason would just be noise.
   if (
     rules.requiresVerifiedIndex &&
     rules.maxHandicapVerificationAgeDays != null &&
+    user.handicap.verifiedAtMs != null &&
     days > rules.maxHandicapVerificationAgeDays
   ) {
     reasons.push(`Re-verify your handicap within the last ${rules.maxHandicapVerificationAgeDays} days.`);

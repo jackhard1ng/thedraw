@@ -7,6 +7,7 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
   signInWithPopup,
+  signInWithRedirect,
   type ConfirmationResult,
 } from 'firebase/auth';
 import { auth, googleProvider, firebaseConfigured } from '@/lib/firebase';
@@ -18,6 +19,17 @@ function normalizeUsPhone(raw: string): string {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
   return raw.startsWith('+') ? raw : `+${digits}`;
+}
+
+/** Firebase auth errors in plain words, with a way forward — never dev-speak. */
+function friendlyAuthError(e: unknown): string {
+  const code = (e as { code?: string }).code ?? '';
+  if (code.includes('invalid-phone-number')) return 'That phone number doesn\'t look right — use a 10-digit US number.';
+  if (code.includes('too-many-requests')) return 'Too many attempts from this device — wait a few minutes and try again, or continue with Google below.';
+  if (code.includes('operation-not-allowed')) return 'Phone sign-in isn\'t enabled on this deployment yet — continue with Google below.';
+  if (code.includes('popup-blocked') || code.includes('popup-closed')) return 'The Google window was blocked or closed — trying again will redirect instead.';
+  if (code.includes('network-request-failed')) return 'Network hiccup — check your connection and try again.';
+  return 'Something went wrong sending the code. Try again, or continue with Google below.';
 }
 
 export function SignIn() {
@@ -45,20 +57,35 @@ export function SignIn() {
       );
       setStage('code');
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyAuthError(e));
+      // A consumed invisible-reCAPTCHA token makes every retry fail until the
+      // verifier is rebuilt — clear it so "try again" actually can.
+      try {
+        verifier.current?.clear();
+      } catch {
+        /* already gone */
+      }
+      verifier.current = null;
     } finally {
       setBusy(false);
     }
   }
 
   async function verifyCode() {
+    if (!confirmation.current) {
+      // The confirmation was lost (e.g. page state reset) — silent no-op is
+      // the worst outcome; send them back to re-request a code.
+      setError('That code expired — request a new one.');
+      setStage('phone');
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
-      await confirmation.current?.confirm(code);
+      await confirmation.current.confirm(code);
       // onAuthStateChanged in AuthContext takes it from here.
     } catch {
-      setError('That code did not match. Try again.');
+      setError('That code did not match. Try again, or resend.');
     } finally {
       setBusy(false);
     }
@@ -66,10 +93,19 @@ export function SignIn() {
 
   async function google() {
     setError(null);
+    setBusy(true);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (e) {
-      setError((e as Error).message);
+      const code = (e as { code?: string }).code ?? '';
+      if (code.includes('popup-blocked') || code.includes('popup-closed') || code.includes('cancelled-popup-request')) {
+        // Popup-hostile contexts (iOS standalone, blockers) → full redirect.
+        await signInWithRedirect(auth, googleProvider).catch((e2) => setError(friendlyAuthError(e2)));
+      } else {
+        setError(friendlyAuthError(e));
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -150,6 +186,9 @@ export function SignIn() {
           >
             {busy ? 'Verifying…' : 'Sign in'}
           </Button>
+          <Button variant="quiet" className="w-full" disabled={busy} onClick={sendCode}>
+            Resend code
+          </Button>
           <Button variant="quiet" className="w-full" onClick={() => setStage('phone')}>
             Use a different number
           </Button>
@@ -162,8 +201,8 @@ export function SignIn() {
         <Rule className="flex-1" />
       </div>
 
-      <Button variant="ghost" className="w-full" disabled={!firebaseConfigured} onClick={google}>
-        Continue with Google
+      <Button variant="ghost" className="w-full" disabled={!firebaseConfigured || busy} onClick={google}>
+        {busy ? '…' : 'Continue with Google'}
       </Button>
 
       {error && <p className="mt-4 text-sm text-tournament">{error}</p>}
