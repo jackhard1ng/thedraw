@@ -49,6 +49,12 @@ interface TemplateDoc {
   allowedPayoutShapes: string[];
   adminFeePercent: number;
   requiresGhinAboveCents: number; // high-stakes gate threshold
+  // Net-capable stroke templates split the purse gross + net, so a mixed
+  // crew ($8–$22) competes fairly instead of the low index sweeping. Net uses
+  // the chosen course's rating when supported, else a percentage of full index
+  // (rough but universally available — the casual-crew reality).
+  netCapable?: boolean;
+  netAllowancePercent?: number; // e.g. 0.9; applies to the net division
   active: boolean;
 }
 
@@ -92,37 +98,78 @@ export const createInstantEvent = onCall<{
   if (!tpl.allowedPayoutShapes.includes(payoutShape) || !PAYOUT_SHAPES[payoutShape]) {
     throw new HttpsError('invalid-argument', 'Payout shape not allowed by this template.');
   }
-  const payoutTable = PAYOUT_SHAPES[payoutShape].map((r) => ({ division: 'gross', ...r }));
 
   if (!startsAt || startsAt < Date.now()) {
     throw new HttpsError('invalid-argument', 'Pick a future tee time.');
+  }
+
+  const format = (await db.doc(`formats/${tpl.formatId}`).get()).data() as
+    | { scoring: string; handicapAllowance: { type?: string } | { percent?: number } | null; teamSize?: number }
+    | undefined;
+
+  // NET DIVISION for a mixed crew. A net-capable stroke template splits the
+  // purse gross + net: gross crowns the best golf straight up, net gives the
+  // 22 a real chance. Net uses the chosen course's rating when it's supported,
+  // otherwise a percentage of full index (rough but always available — what a
+  // weekend crew actually does). handicapAllowanceOverride tells runClose how
+  // to freeze each card's strokes.
+  let divisionMode = 'grossOnly';
+  let handicapAllowanceOverride: { percent: number; ratinglessOk: true } | null = null;
+  const netAllowance = tpl.netAllowancePercent ?? 0.9;
+  const shape = PAYOUT_SHAPES[payoutShape];
+  let payoutTable: { division: string; place: number; sharePercent: number }[];
+  if (tpl.netCapable && format?.scoring === 'strokePlay') {
+    // Split each place's share in half across gross and net (largest-remainder
+    // keeps the table summing to 100).
+    divisionMode = 'both';
+    handicapAllowanceOverride = { percent: netAllowance, ratinglessOk: true };
+    payoutTable = shape.flatMap((r) => {
+      const grossShare = Math.round(r.sharePercent / 2);
+      return [
+        { division: 'gross', place: r.place, sharePercent: grossShare },
+        { division: 'net', place: r.place, sharePercent: r.sharePercent - grossShare },
+      ];
+    });
+  } else {
+    payoutTable = shape.map((r) => ({ division: 'gross', ...r }));
   }
 
   // High-stakes gate above the template threshold — compared PER PLAYER, not
   // per team entry: a $40-a-head scramble is a $40 event to each player, not
   // an $80 one. Below it, an open GROSS format relaxes the index requirement —
   // the index decides nothing there, so no handicap record is needed to play.
-  const format = (await db.doc(`formats/${tpl.formatId}`).get()).data() as
-    | { scoring: string; handicapAllowance: { type?: string } | { percent?: number } | null; teamSize?: number }
-    | undefined;
   const scratchByDesign = (format?.handicapAllowance as { type?: string } | null)?.type === 'none';
   const indexLoadBearing =
     (tpl.indexRange ?? null) != null ||
     (!scratchByDesign &&
-      (format?.scoring === 'matchPlay' || format?.handicapAllowance != null));
+      (format?.scoring === 'matchPlay' || format?.handicapAllowance != null || divisionMode === 'both'));
   const perPlayerFeeCents = Math.round(
     entryFeeCents / Math.max(1, format?.teamSize ?? 1),
   );
-  const eligibility = {
-    ...(perPlayerFeeCents > tpl.requiresGhinAboveCents
-      ? HIGH_STAKES_ELIGIBILITY
-      : entryFeeCents > 0
-        ? { ...DEFAULT_PAID_ELIGIBILITY, ...(indexLoadBearing ? {} : { requiresVerifiedIndex: false }) }
-        : FREE_ELIGIBILITY),
-    // Tier-banded templates ("C/D only") carry their band into eligibility —
-    // enforced at entry, displayed on the event page.
-    ...(tpl.indexRange ? { indexRange: tpl.indexRange } : {}),
-  };
+  const highStakes = perPlayerFeeCents > tpl.requiresGhinAboveCents;
+  // LOW-STAKES CREW RELAXATION: a sub-threshold instant event is a game among
+  // people who know each other (bounded downside, self-policing field), so it
+  // waives the 14-day apprenticeship AND self-declared indexes are fine — even
+  // for net. Sandbagging a $20 game among friends isn't the threat model;
+  // anonymous high-stakes net is, and that keeps the full gate below.
+  let eligibility: Record<string, unknown>;
+  if (highStakes) {
+    eligibility = { ...HIGH_STAKES_ELIGIBILITY };
+  } else if (entryFeeCents > 0) {
+    eligibility = {
+      ...DEFAULT_PAID_ELIGIBILITY,
+      requiresVerifiedIndex: (tpl.indexRange ?? null) != null, // tier bands still verify
+      minEventsCompleted: 0,
+      minAttendanceRate: 0,
+      minAccountAgeDays: 0,
+    };
+    delete (eligibility as { minAttestedRounds?: number }).minAttestedRounds;
+  } else {
+    eligibility = { ...FREE_ELIGIBILITY };
+  }
+  // Tier-banded templates ("C/D only") carry their band into eligibility.
+  if (tpl.indexRange) eligibility.indexRange = tpl.indexRange;
+  void indexLoadBearing;
 
   // Registration closes shortly before the round so authorize/capture works the
   // same as any tournament (capture at close, void under minimum).
@@ -139,7 +186,8 @@ export const createInstantEvent = onCall<{
     entryFeeCents,
     adminFeePercent: tpl.adminFeePercent, // the 10% tier
     payoutTable, // FROZEN at creation
-    divisionMode: 'grossOnly',
+    divisionMode,
+    handicapAllowanceOverride, // null for gross; percent+ratinglessOk for net
     doubleDipRule: 'onePrizePerPlayer',
     prizeType: 'cashPurse',
     sponsoredPrizes: null,

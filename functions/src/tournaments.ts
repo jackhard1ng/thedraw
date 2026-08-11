@@ -673,6 +673,9 @@ export async function runClose(tournamentId: string) {
       await fBatch.commit();
     }
 
+    // An instant net event overrides the format's (null) allowance with its
+    // stored percent so the net division actually gets strokes.
+    const allowance = t.handicapAllowanceOverride ?? format?.handicapAllowance ?? null;
     await createScorecards(
       tournamentId,
       entries.map((e) => ({
@@ -683,7 +686,7 @@ export async function runClose(tournamentId: string) {
       })),
       rounds,
       designated,
-      format?.handicapAllowance ?? null,
+      allowance,
       t.roundDeadlineDays ?? 7,
     );
   }

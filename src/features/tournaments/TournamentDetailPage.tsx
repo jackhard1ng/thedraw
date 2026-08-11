@@ -152,6 +152,7 @@ export function TournamentDetailPage() {
     paymentMode: 'authorize' | 'setup';
   } | null>(null);
   const [justEntered, setJustEntered] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Best-effort derived stats for the courtesy eligibility check. The Cloud
   // Function recomputes these authoritatively; here we approximate and lean
@@ -186,6 +187,7 @@ export function TournamentDetailPage() {
 
   const uid = fbUser?.uid;
   const myEntry = entries?.find((e) => uid && e.userIds.includes(uid) && e.status !== 'withdrawn');
+  const isCreator = !!uid && tournament.createdBy === uid;
   const free = tournament.entryFeeCents === 0;
   const item = itemizeEntry(tournament.entryFeeCents, tournament.adminFeePercent);
   const field = tournament.entryIds?.length ?? 0;
@@ -280,9 +282,32 @@ export function TournamentDetailPage() {
             <Num>{tournament.minEntries}</Num>
           </p>
         </div>
-        <Badge tone={tournament.status === 'open' ? 'fresh' : 'neutral'}>
-          {tournament.status}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          {tournament.status === 'open' && (
+            <button
+              className="btn-quiet px-2 py-1 text-xs"
+              onClick={async () => {
+                const url = window.location.href;
+                const shareData = { title: tournament.name, text: `Join my game on The Draw: ${tournament.name}`, url };
+                try {
+                  if (navigator.share) await navigator.share(shareData);
+                  else {
+                    await navigator.clipboard.writeText(url);
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2000);
+                  }
+                } catch {
+                  /* user dismissed the share sheet */
+                }
+              }}
+            >
+              {shareCopied ? 'Link copied' : 'Share'}
+            </button>
+          )}
+          <Badge tone={tournament.status === 'open' ? 'fresh' : 'neutral'}>
+            {tournament.status}
+          </Badge>
+        </div>
       </div>
 
       {tournament.description && (
@@ -304,6 +329,20 @@ export function TournamentDetailPage() {
           )}
         </div>
       )}
+
+      {/* Enter your score — for a stroke-play event this is THE action after the
+          round, and the form lives on its own page nothing else linked to. */}
+      {myEntry &&
+        tournament.status === 'inProgress' &&
+        tournament.structure !== 'bracket' && (
+          <Button
+            variant="primary"
+            className="mt-4 w-full"
+            onClick={() => nav(`/tournaments/${tournament.id}/scorecard`)}
+          >
+            Enter your score
+          </Button>
+        )}
 
       {/* The player's live match — the single most important link on this page.
           Every deadline in the forfeit ladder counts down on the other side of it. */}
@@ -496,8 +535,9 @@ export function TournamentDetailPage() {
       <Rule className="my-8" />
 
       {/* Field chat — self-serve events organize their own tee times here.
-          Entered players only; threadId = tournamentId. */}
-      {myEntry && (tournament.status === 'open' || tournament.status === 'inProgress') && (
+          Entered players AND the creator (who's a thread member from creation,
+          so they can organize before paying their own entry). */}
+      {(myEntry || isCreator) && (tournament.status === 'open' || tournament.status === 'inProgress') && (
         <div className="mb-8">
           <SectionHeader>Field chat</SectionHeader>
           <p className="mb-2 text-xs text-ink-faint">

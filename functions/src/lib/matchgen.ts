@@ -149,22 +149,32 @@ export async function createPodMatches(tid: string, pods: string[][]) {
  *   { type:'none' } / null            — gross, no strokes ever.
  */
 export type AllowanceSpec =
-  | { percent: number }
+  | { percent: number; ratinglessOk?: boolean }
   | { type: 'scramble2'; low: number; high: number }
   | { type: 'none' }
   | null;
 
+/**
+ * Playing handicap from the spec. `tee` is null when the course has no rating
+ * on file; a `{percent, ratinglessOk}` spec then falls back to a percentage of
+ * full index (casual net, no rating needed) so a weekend crew gets a real net
+ * division at any course. Every other spec needs a rating and returns null
+ * (gross) without one.
+ */
 function playingHandicap(
   spec: AllowanceSpec,
   entry: { combinedIndex: number; indexes?: number[] },
-  tee: { slope: number; rating: number; par: number },
+  tee: { slope: number; rating: number; par: number } | null,
 ): number | null {
   if (!spec || ('type' in spec && spec.type === 'none')) return null;
-  const ch = (index: number) => index * (tee.slope / 113) + (tee.rating - tee.par);
+  const ch = (index: number) =>
+    tee ? index * (tee.slope / 113) + (tee.rating - tee.par) : index;
   if ('percent' in spec) {
+    if (!tee && !spec.ratinglessOk) return null;
     return Math.round(ch(entry.combinedIndex) * spec.percent);
   }
   if (spec.type === 'scramble2') {
+    if (!tee) return null; // scramble math needs a rating
     // Legacy entries may lack per-player indexes; splitting the sum evenly is
     // the least-wrong fallback (never silently gross).
     const pair =
@@ -223,7 +233,9 @@ export async function createScorecards(
   for (const e of entries) {
     for (let r = 1; r <= rounds; r++) {
       const tee = teeByRound[r - 1];
-      const courseHandicap = tee ? playingHandicap(spec, e, tee) : null;
+      // playingHandicap handles a null tee itself (ratingless net falls back to
+      // a percentage of full index) — don't short-circuit it here.
+      const courseHandicap = playingHandicap(spec, e, tee);
       const id = `${tid}_${e.id}_${r}`;
       batch.set(db.doc(`scorecards/${id}`), {
         tournamentId: tid,

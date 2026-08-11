@@ -175,6 +175,10 @@ const TEMPLATES = [
     allowedPayoutShapes: ['60_30_10', '70_30', 'winnerTakeAll'],
     adminFeePercent: 10,
     requiresGhinAboveCents: 7500,
+    // Gross + net divisions so a mixed 8–22 crew all have a chance. Net uses
+    // the course rating when supported, else full-index net.
+    netCapable: true,
+    netAllowancePercent: 0.9,
     active: true,
   },
   {
@@ -188,6 +192,8 @@ const TEMPLATES = [
     allowedPayoutShapes: ['winnerTakeAll', '70_30', '60_30_10'],
     adminFeePercent: 10,
     requiresGhinAboveCents: 7500,
+    netCapable: true,
+    netAllowancePercent: 0.9,
     active: true,
   },
   {

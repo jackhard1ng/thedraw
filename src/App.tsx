@@ -4,7 +4,8 @@
  *   2. signed in, no profile    -> Onboarding (creates users doc)
  *   3. signed in, has profile   -> the app (board is home)
  */
-import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter, Route, Routes, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { Spinner } from '@/components/ui';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -38,12 +39,37 @@ function PublicShell({ children }: { children: React.ReactNode }) {
       <Masthead marketName="Kansas City" />
       {children}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-rule bg-paper-raised/95 p-3 text-center backdrop-blur">
-        <a href="/" className="font-display uppercase tracking-wide text-sm text-tournament">
+        <a
+          href="/"
+          className="font-display uppercase tracking-wide text-sm text-tournament"
+          onClick={() => {
+            // Remember where they were, so a shared event link survives signup
+            // and drops them back on the game instead of a strange board.
+            localStorage.setItem(RETURN_TO_KEY, window.location.pathname);
+          }}
+        >
           The Draw — sign in to play →
         </a>
       </div>
     </div>
   );
+}
+
+const RETURN_TO_KEY = 'thedraw.returnTo';
+
+/** After auth, bounce once to the deep link the visitor started on. */
+function ReturnToRedirect() {
+  const nav = useNavigate();
+  useEffect(() => {
+    const dest = localStorage.getItem(RETURN_TO_KEY);
+    if (dest && dest !== '/' && dest !== window.location.pathname) {
+      localStorage.removeItem(RETURN_TO_KEY);
+      nav(dest, { replace: true });
+    } else if (dest) {
+      localStorage.removeItem(RETURN_TO_KEY);
+    }
+  }, [nav]);
+  return null;
 }
 
 function Shell() {
@@ -79,6 +105,7 @@ function Shell() {
 
   return (
     <div className="min-h-dvh pb-16">
+      <ReturnToRedirect />
       <Masthead
         marketName={profile.marketId === 'kc' ? 'Kansas City' : profile.marketId.toUpperCase()}
         right={<Bell />}

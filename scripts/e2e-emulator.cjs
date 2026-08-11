@@ -584,6 +584,49 @@ async function main() {
   const wk2t = (await db.doc(`tournaments/${wk2stop.tournamentId}`).get()).data();
   check('stop fee is configurable, not 25%-hardcoded', wk2t.adminFeePercent === 0, wk2t.adminFeePercent);
 
+  // ================= FLOW J — instant net event (mixed crew) ================
+  console.log('\nFLOW J — net-capable instant event: mixed crew, day-one entry');
+  await db.doc('eventTemplates/netClassic').set({
+    marketId: 'kc', name: 'Net Classic', formatId: 'grossFoursome',
+    fieldSize: 8, fieldSizeMin: 4, entryFeeMinCents: 2000, entryFeeMaxCents: 10000,
+    allowedPayoutShapes: ['70_30'], adminFeePercent: 10, requiresGhinAboveCents: 7500,
+    netCapable: true, netAllowancePercent: 0.9, active: true,
+  });
+  // A brand-new, self-declared crew member (0 events, account made just now).
+  await db.doc('users/crew1').set({
+    marketId: 'kc', displayName: 'Fresh, Guy', photoUrl: null, age: 30, gender: 'other',
+    handicap: { index: 21.0, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
+    role: 'member', organizerMarkets: [], canCreatePaidEvents: false,
+    createdAt: Timestamp.now(), status: 'active', areas: [],
+  });
+  const instEvt = await call(fns.createInstantEvent, 'crew1', {
+    templateId: 'netClassic', placeId: null, startsAt: Date.now() + 3 * 86400000,
+    entryFeeCents: 2000, payoutShape: '70_30',
+  });
+  const instT = (await db.doc(`tournaments/${instEvt.tournamentId}`).get()).data();
+  check('net instant event has both divisions', instT.divisionMode === 'both', instT.divisionMode);
+  check('payout table carries gross AND net rows',
+    instT.payoutTable.some((r) => r.division === 'gross') && instT.payoutTable.some((r) => r.division === 'net'));
+  check('net allowance override stored', instT.handicapAllowanceOverride && instT.handicapAllowanceOverride.percent === 0.9);
+  check('low-stakes tier drops the 14-day wall', instT.eligibility.minAccountAgeDays === 0, instT.eligibility.minAccountAgeDays);
+  check('low-stakes net allows self-declared index', instT.eligibility.requiresVerifiedIndex === false);
+  // The fresh self-declared 21 clears the ELIGIBILITY gate (Stripe is off in
+  // tests, so a paid entry stops at the payment rail — reaching it proves the
+  // apprenticeship/verification gate let him through).
+  let eligPassed = false;
+  try {
+    await call(fns.enterTournament, 'crew1', { tournamentId: instEvt.tournamentId });
+    eligPassed = true;
+  } catch (e) {
+    eligPassed = /payments are not configured/i.test(e.message);
+  }
+  check('brand-new self-declared crew member clears the entry gate', eligPassed);
+  // Ratingless net: no course rating on file → net = round(index × 0.9).
+  await createScorecards('netInstant1', [{ id: 'ni1', userIds: ['crew1'], combinedIndex: 21.0, indexes: [21.0] }],
+    1, [], { percent: 0.9, ratinglessOk: true });
+  const niCard = (await db.doc('scorecards/netInstant1_ni1_1').get()).data();
+  check('ratingless net: 21 index → 19 strokes (round(21×0.9))', niCard.courseHandicap === 19, niCard.courseHandicap);
+
   // ================= FLOW H — course data entry + promotion ==================
   console.log('\nFLOW H — course data entry (listed → supported)');
   await db.doc('courses/promoteMe').set({

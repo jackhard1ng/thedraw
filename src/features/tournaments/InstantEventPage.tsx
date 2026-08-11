@@ -20,10 +20,12 @@ interface Template {
   formatId: string;
   fieldSize: number;
   fieldSizeMin?: number; // runs at this many; caps at fieldSize
+  indexRange?: [number, number] | null;
   entryFeeMinCents: number;
   entryFeeMaxCents: number;
   allowedPayoutShapes: string[];
   adminFeePercent: number;
+  netCapable?: boolean;
   active: boolean;
 }
 
@@ -42,6 +44,7 @@ export function InstantEventPage() {
   const [startsAt, setStartsAt] = useState('');
   const [fee, setFee] = useState('');
   const [shape, setShape] = useState('');
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +102,7 @@ export function InstantEventPage() {
         startsAt: new Date(startsAt).getTime(),
         entryFeeCents: feeCents,
         payoutShape: shape,
+        ...(name.trim() ? { name: name.trim() } : {}),
       });
       nav(`/tournaments/${res.data.tournamentId}`);
     } catch (e) {
@@ -152,6 +156,15 @@ export function InstantEventPage() {
             {course && <p className="mt-1 text-sm text-pine">Selected: {course.name}</p>}
           </Field>
 
+          <Field label="Name this game (optional)" hint="So your crew spots it in the list.">
+            <input
+              className="field-input"
+              placeholder={tpl.name}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+
           <div className="grid grid-cols-2 gap-4">
             <Field label="Tee time">
               <input
@@ -177,6 +190,16 @@ export function InstantEventPage() {
               </Field>
             )}
           </div>
+
+          {tpl.netCapable && (
+            <p className="rounded-sm border border-pine/30 bg-pine/5 p-3 text-xs text-ink-soft">
+              This game pays <span className="text-ink">two divisions</span> —
+              low gross and low net (handicaps applied). The payout below is
+              split evenly between them, so your higher-handicap buddies have a
+              real shot. Net uses the course rating when it's on file, otherwise
+              your full index.
+            </p>
+          )}
 
           <Field label="Payout shape">
             <div className="flex gap-2">
