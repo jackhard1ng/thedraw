@@ -59,34 +59,51 @@ export const onChatMessage = onDocumentCreated(
     );
     if (participants.length === 0) return;
 
-    const isMatch = (await db.doc(`matches/${threadId}`).get()).exists;
+    const matchSnap = await db.doc(`matches/${threadId}`).get();
+    const isMatch = matchSnap.exists;
     const link = (await db.doc(`roundPosts/${threadId}`).get()).exists
       ? `/post/${threadId}`
       : isMatch
         ? `/matches/${threadId}`
         : `/tournaments/${threadId}`;
 
+    // GAME-DAY OVERRIDE: within 12h of a match's agreed tee time, every
+    // message notifies. "I'm on the tee, where are you?" must never be eaten
+    // by a politeness throttle.
+    let gameDay = false;
+    if (isMatch) {
+      const agreed = (matchSnap.data() as { scheduling?: { agreedTime?: Timestamp | null } })
+        ?.scheduling?.agreedTime;
+      if (agreed) gameDay = Math.abs(agreed.toMillis() - Date.now()) < 12 * 3_600_000;
+    }
+
     const hourAgo = Timestamp.fromMillis(Date.now() - 3_600_000);
     for (const userId of participants) {
-      // Throttle: skip if this user was already pinged about this thread
-      // within the hour (read or not) — conversations ping once.
-      const recent = await db
-        .collection('notifications')
-        .where('userId', '==', userId)
-        .where('link', '==', link)
-        .where('createdAt', '>', hourAgo)
-        .limit(1)
-        .get();
-      if (!recent.empty) continue;
+      // Throttle: skip if this user was already pinged about CHAT in this
+      // thread within the hour. Keyed to kind 'chat' — a "confirm your
+      // result" notice sharing the same link must not suppress chat pings.
+      if (!gameDay) {
+        const recent = await db
+          .collection('notifications')
+          .where('userId', '==', userId)
+          .where('threadId', '==', threadId)
+          .where('kind', '==', 'chat')
+          .where('createdAt', '>', hourAgo)
+          .limit(1)
+          .get();
+        if (!recent.empty) continue;
+      }
       await notify({
         userId,
         title: `${msg.authorName} in your group chat`,
         body: msg.text.slice(0, 120),
         // Match coordination is time-sensitive and the web can't push — a
-        // match-thread message rides SMS (hourly-throttled) so scheduling
-        // conversations reach people who don't have the site open (§5).
+        // match-thread message rides SMS (hourly-throttled, except game day)
+        // so scheduling conversations reach people without the site open (§5).
         deadlineCritical: isMatch,
         link,
+        kind: 'chat',
+        threadId,
       });
     }
   },

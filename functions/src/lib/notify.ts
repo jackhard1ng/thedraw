@@ -18,6 +18,8 @@ export async function notify(args: {
   body: string;
   deadlineCritical?: boolean; // routes to SMS
   link?: string;
+  kind?: string; // e.g. 'chat' — lets throttles target ONLY their own kind
+  threadId?: string;
 }) {
   // Always leave an in-app record.
   await db.collection('notifications').add({
@@ -25,6 +27,8 @@ export async function notify(args: {
     title: args.title,
     body: args.body,
     link: args.link ?? null,
+    kind: args.kind ?? null,
+    threadId: args.threadId ?? null,
     createdAt: FieldValue.serverTimestamp(),
     read: false,
   });
