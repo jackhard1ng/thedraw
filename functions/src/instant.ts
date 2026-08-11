@@ -41,7 +41,8 @@ interface TemplateDoc {
   marketId: string;
   name: string;
   formatId: string;
-  fieldSize: number;
+  fieldSize: number; // maximum field
+  fieldSizeMin?: number; // minimum to run; omitted = runs full or not at all
   entryFeeMinCents: number;
   entryFeeMaxCents: number;
   allowedPayoutShapes: string[];
@@ -130,7 +131,10 @@ export const createInstantEvent = onCall<{
     doubleDipRule: 'onePrizePerPlayer',
     prizeType: 'cashPurse',
     sponsoredPrizes: null,
-    minEntries: tpl.fieldSize, // an instant event runs full or not at all
+    // Small games run full or not at all; bigger fields (e.g. the Saturday
+    // Classic's 8–16) set fieldSizeMin so the event runs once viable. Under
+    // minimum at close, every authorization is voided — nobody is charged.
+    minEntries: tpl.fieldSizeMin ?? tpl.fieldSize,
     maxEntries: tpl.fieldSize,
     registrationOpens: Timestamp.now(),
     registrationCloses: Timestamp.fromMillis(Math.max(closes, Date.now() + 15 * 60_000)),

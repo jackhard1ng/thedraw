@@ -125,6 +125,22 @@ console.log(`Seeded ${FORMATS.length} formats`);
 // these; the template is the organizer's act.
 const TEMPLATES = [
   {
+    // The flagship: 8–16 players, Saturday morning stroke play, done by noon —
+    // trophy settled before college football kicks off. Runs at 8+, caps at 16.
+    id: 'saturdayClassic',
+    marketId: 'kc',
+    name: 'The Saturday Classic',
+    formatId: 'grossFoursome',
+    fieldSize: 16,
+    fieldSizeMin: 8,
+    entryFeeMinCents: 2000,
+    entryFeeMaxCents: 10000,
+    allowedPayoutShapes: ['60_30_10', '70_30', 'winnerTakeAll'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
+  {
     id: 'sundayFoursome',
     marketId: 'kc',
     name: 'Sunday Foursome',
