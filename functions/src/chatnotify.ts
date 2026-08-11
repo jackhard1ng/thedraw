@@ -59,9 +59,10 @@ export const onChatMessage = onDocumentCreated(
     );
     if (participants.length === 0) return;
 
+    const isMatch = (await db.doc(`matches/${threadId}`).get()).exists;
     const link = (await db.doc(`roundPosts/${threadId}`).get()).exists
       ? `/post/${threadId}`
-      : (await db.doc(`matches/${threadId}`).get()).exists
+      : isMatch
         ? `/matches/${threadId}`
         : `/tournaments/${threadId}`;
 
@@ -81,6 +82,10 @@ export const onChatMessage = onDocumentCreated(
         userId,
         title: `${msg.authorName} in your group chat`,
         body: msg.text.slice(0, 120),
+        // Match coordination is time-sensitive and the web can't push — a
+        // match-thread message rides SMS (hourly-throttled) so scheduling
+        // conversations reach people who don't have the site open (§5).
+        deadlineCritical: isMatch,
         link,
       });
     }
