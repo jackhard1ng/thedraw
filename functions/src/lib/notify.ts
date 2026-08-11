@@ -32,7 +32,37 @@ export async function notify(args: {
   if (args.deadlineCritical) {
     await sendSms(args.userId, `${args.title}\n${args.body}`);
   }
-  // FCM push (bonus channel) would fan out here to the user's registered tokens.
+
+  // FCM web push — real device banners for users who enabled notifications.
+  await sendPush(args.userId, args.title, args.body, args.link ?? null);
+}
+
+async function sendPush(userId: string, title: string, body: string, link: string | null) {
+  try {
+    const user = (await db.doc(`users/${userId}`).get()).data() as
+      | { fcmTokens?: string[] }
+      | undefined;
+    const tokens = user?.fcmTokens ?? [];
+    if (tokens.length === 0) return;
+    const { getMessaging } = await import('firebase-admin/messaging');
+    const res = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: { title, body },
+      data: link ? { link } : {},
+      webpush: { notification: { icon: '/icon.svg' } },
+    });
+    // Prune dead tokens so the list stays clean.
+    const dead = tokens.filter((_, i) => {
+      const err = res.responses[i].error?.code ?? '';
+      return err.includes('registration-token-not-registered') || err.includes('invalid-argument');
+    });
+    if (dead.length) {
+      const { FieldValue } = await import('firebase-admin/firestore');
+      await db.doc(`users/${userId}`).update({ fcmTokens: FieldValue.arrayRemove(...dead) });
+    }
+  } catch (e) {
+    console.error(`[push:error] ${userId}: ${(e as Error).message}`);
+  }
 }
 
 async function sendSms(userId: string, message: string) {

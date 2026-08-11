@@ -104,6 +104,38 @@ function SelfReportedRounds({ userId }: { userId: string }) {
   );
 }
 
+/** Device notifications (FCM web push) — banners like any installed app. */
+function PushButton() {
+  const [state, setState] = useState<'idle' | 'busy' | 'enabled' | 'denied' | 'unsupported'>('idle');
+  return (
+    <div className="flex items-center justify-between py-2 text-sm">
+      <span className="text-ink">
+        Device notifications
+        <span className="block text-xs text-ink-faint">
+          Banners for draws, deadlines, and chat — like any app. On iPhone, add
+          to Home Screen first.
+        </span>
+      </span>
+      {state === 'enabled' ? (
+        <Badge tone="fresh">On</Badge>
+      ) : (
+        <Button
+          variant="ghost"
+          className="px-3 py-1.5 text-xs"
+          disabled={state === 'busy'}
+          onClick={async () => {
+            setState('busy');
+            const { enablePush } = await import('@/lib/push');
+            setState(await enablePush());
+          }}
+        >
+          {state === 'busy' ? '…' : state === 'denied' ? 'Blocked in browser' : state === 'unsupported' ? 'Not available' : 'Enable'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /** Match alerts (opt-in): in-app notice when a matching round posts. */
 function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts: boolean; maxIndexDelta: number | null } }) {
   const on = prefs?.newPostAlerts ?? false;
@@ -260,6 +292,7 @@ export function ProfilePage() {
       {/* Notifications */}
       <div className="mt-6">
         <SectionHeader>Alerts</SectionHeader>
+        <PushButton />
         <AlertPrefs userId={fbUser.uid} prefs={profile.alertPrefs} />
       </div>
 
