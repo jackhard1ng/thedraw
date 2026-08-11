@@ -265,6 +265,8 @@ export interface Tournament {
   eligibility: Eligibility;
   structure: TournamentStructure;
   roundDeadlineDays: number;
+  /** House rules, stated before entry (league stops carry the series rules). */
+  rules?: string | null;
   status: TournamentStatus;
   entryIds: string[];
 }

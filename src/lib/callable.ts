@@ -256,6 +256,7 @@ export const createTourSeries = httpsCallable<
   {
     name: string;
     season: string;
+    rules?: string;
     schedule?: {
       firstStartAt: number;
       weeks: number;

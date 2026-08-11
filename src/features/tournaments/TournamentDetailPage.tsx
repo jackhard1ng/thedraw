@@ -351,6 +351,17 @@ export function TournamentDetailPage() {
         )}
       </div>
 
+      {/* House rules — argued on the first tee exactly never, because they're
+          stated here, before anyone enters. */}
+      {tournament.rules && (
+        <div className="mt-6">
+          <SectionHeader>House rules</SectionHeader>
+          <Card className="p-4">
+            <p className="whitespace-pre-wrap text-sm text-ink-soft">{tournament.rules}</p>
+          </Card>
+        </div>
+      )}
+
       {/* Payout grid */}
       <div className="mt-6">
         <SectionHeader
@@ -430,6 +441,10 @@ export function TournamentDetailPage() {
               You're only charged if the event runs. Enter and your card is held
               (or saved, for longer windows); if the field falls short at close,
               nothing is collected.
+            </p>
+            <p className="mt-1 text-xs text-ink-faint">
+              Green fees are separate — you pay the course directly when you
+              play, unless the event says otherwise.
             </p>
           </Card>
         )}

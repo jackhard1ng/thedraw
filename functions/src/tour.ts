@@ -40,9 +40,21 @@ export interface SeriesSchedule {
   countBest: number; // best-N weeks count toward season standings
 }
 
+/**
+ * Default house rules — stated up front on every stop so nobody argues on the
+ * green. Organizers edit them per league; the defaults are Jack's:
+ */
+export const DEFAULT_LEAGUE_RULES =
+  'Green fees are paid at the course each week — your entry covers the purse and platform only. ' +
+  'No gimmes — putt everything out. ' +
+  'Double par is the max on any hole: pick up and write it down. ' +
+  'Play it as it lies; agree any local relief on the first tee. ' +
+  'Scores are attested by your group.';
+
 export const createTourSeries = onCall<{
   name: string; // "KC Tuesday Night League"
   season: string; // "2026 Summer"
+  rules?: string; // house rules — league to league; defaults above
   schedule?: {
     firstStartAt: number;
     weeks: number;
@@ -103,6 +115,7 @@ export const createTourSeries = onCall<{
     marketId: user.marketId,
     name: req.data.name.slice(0, 80),
     season: req.data.season.slice(0, 20),
+    rules: (req.data.rules ?? DEFAULT_LEAGUE_RULES).slice(0, 2000),
     createdBy: uid,
     status: 'active',
     schedule,
@@ -128,7 +141,7 @@ async function createStopInternal(
   s: SeriesSchedule,
 ) {
   const series = (await db.doc(`tourSeries/${seriesId}`).get()).data() as
-    | { name: string; season: string }
+    | { name: string; season: string; rules?: string }
     | undefined;
   if (!series) throw new HttpsError('not-found', 'Series not found.');
   const startsAt = s.firstStartAt + (weekNumber - 1) * WEEK_MS;
@@ -143,6 +156,7 @@ async function createStopInternal(
     weekNumber,
     name: `${series.name} · Week ${weekNumber}`,
     description: `Tour stop — ${series.season}`,
+    rules: series.rules ?? DEFAULT_LEAGUE_RULES,
     entryFeeCents: s.entryFeeCents,
     adminFeePercent: s.entryFeeCents > 0 ? s.adminFeePercent : 0,
     payoutTable:

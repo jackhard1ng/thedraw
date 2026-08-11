@@ -24,6 +24,13 @@ export function CreateLeagueForm() {
   const [maxEntries, setMaxEntries] = useState(32);
   const [courses, setCourses] = useState<CoursePick[]>([]);
   const [flightCut, setFlightCut] = useState(''); // optional index split, e.g. "12"
+  const [rules, setRules] = useState(
+    'Green fees are paid at the course each week — your entry covers the purse and platform only. ' +
+      'No gimmes — putt everything out. ' +
+      'Double par is the max on any hole: pick up and write it down. ' +
+      'Play it as it lies; agree any local relief on the first tee. ' +
+      'Scores are attested by your group.',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +46,7 @@ export function CreateLeagueForm() {
       const res = await createTourSeries({
         name: name.trim(),
         season: season.trim(),
+        rules: rules.trim(),
         schedule: {
           firstStartAt: new Date(firstTee).getTime(),
           weeks,
@@ -172,6 +180,17 @@ export function CreateLeagueForm() {
             placeholder="12"
             value={flightCut}
             onChange={(e) => setFlightCut(e.target.value)}
+          />
+        </Field>
+
+        <Field
+          label="House rules"
+          hint="Shown on every week's page before anyone enters. Edit freely — rules go league to league; these defaults keep the arguments off the green."
+        >
+          <textarea
+            className="field-input min-h-28"
+            value={rules}
+            onChange={(e) => setRules(e.target.value)}
           />
         </Field>
 

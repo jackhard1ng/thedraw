@@ -155,6 +155,11 @@ export const createInstantEvent = onCall<{
     eligibility,
     structure: 'singleRound',
     roundDeadlineDays: 1,
+    // Baseline ground rules on every money game — the rest is first-tee talk.
+    rules:
+      'Green fees are paid at the course — your entry is purse and platform only. ' +
+      'No gimmes outside match play — putt everything out. ' +
+      'Agree any local relief (lift-clean-place, lateral drops) on the first tee, never after.',
     status: 'open', // live immediately — no review, no waiting
     entryIds: [],
     isInstant: true,
