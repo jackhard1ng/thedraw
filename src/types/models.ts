@@ -70,6 +70,8 @@ export interface User {
     newPostAlerts: boolean;
     maxIndexDelta: number | null; // null = any level
   };
+  /** Where in the metro they'd play (KC_AREAS ids). Empty/absent = anywhere. */
+  areas?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +488,7 @@ export interface PlayRequest {
   index: number; // frozen at entry
   day: string; // "saturday"
   willingToBook: boolean;
+  areas?: string[]; // copied from the user at entry; empty = anywhere
   status: 'open' | 'matched' | 'withdrawn' | 'expired';
   postId?: string;
   createdAt: Ts;

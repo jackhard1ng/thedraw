@@ -27,6 +27,7 @@ import { useAuth } from '@/context/AuthContext';
 import { deleteAccount } from '@/lib/callable';
 import { Badge, Button, Card, Num, Rule, SectionHeader, Spinner } from '@/components/ui';
 import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
+import { areasFor } from '@/lib/areas';
 import { formatTeeTime } from '@/lib/format';
 import type { ReputationEvent, Round } from '@/types/models';
 
@@ -169,6 +170,64 @@ function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts
   );
 }
 
+/**
+ * Where they'll play. The metro is wide — downtown and Blue Springs shouldn't
+ * get drawn together unless someone said "anywhere". Empty selection = anywhere
+ * (the friendly default: never blocks a match).
+ */
+function AreaPrefs({ userId, marketId, areas }: { userId: string; marketId: string; areas?: string[] }) {
+  const options = areasFor(marketId);
+  const selected = new Set(areas ?? []);
+  const [busy, setBusy] = useState(false);
+  if (options.length === 0) return null;
+
+  async function toggleArea(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setBusy(true);
+    try {
+      await updateDoc(doc(db, 'users', userId), { areas: [...next] });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="py-2">
+      <p className="text-sm text-ink">Where you’ll play</p>
+      <p className="text-xs text-ink-faint">
+        The draw only groups you with players in a shared area. Pick none to
+        play anywhere in the metro.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {options.map((a) => {
+          const on = selected.has(a.id);
+          return (
+            <button
+              key={a.id}
+              type="button"
+              disabled={busy}
+              onClick={() => toggleArea(a.id)}
+              title={a.hint}
+              className={`rounded-full border px-3 py-1 text-xs font-display uppercase tracking-wide transition-colors ${
+                on
+                  ? 'border-tournament bg-tournament text-paper'
+                  : 'border-rule-strong text-ink-soft'
+              }`}
+            >
+              {a.label}
+            </button>
+          );
+        })}
+      </div>
+      {selected.size === 0 && (
+        <p className="mt-2 text-xs text-ink-faint">Currently: anywhere.</p>
+      )}
+    </div>
+  );
+}
+
 export function ProfilePage() {
   const { profile, fbUser, signOutNow } = useAuth();
   if (!profile || !fbUser) return <Spinner />;
@@ -294,6 +353,12 @@ export function ProfilePage() {
         <SectionHeader>Alerts</SectionHeader>
         <PushButton />
         <AlertPrefs userId={fbUser.uid} prefs={profile.alertPrefs} />
+      </div>
+
+      {/* Area preferences — feed the draw's grouping (shared-area rule) */}
+      <div className="mt-6">
+        <SectionHeader>Home turf</SectionHeader>
+        <AreaPrefs userId={fbUser.uid} marketId={profile.marketId} areas={profile.areas} />
       </div>
 
       <Rule className="my-8" />

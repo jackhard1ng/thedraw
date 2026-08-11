@@ -62,7 +62,7 @@ export { collectGreenFees, cancelScheduledMatch } from './greenfees';
 
 export { ensureCourse, updateCourseData } from './courses';
 
-export { attestRound, onRoundPosted } from './boardlife';
+export { attestRound, onRoundPosted, confirmTeeTime } from './boardlife';
 
 export { onChatMessage } from './chatnotify';
 

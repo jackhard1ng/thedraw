@@ -9,8 +9,9 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { usePost } from './useRoundPosts';
-import { attestRound, joinRound, leaveRound } from '@/lib/callable';
+import { attestRound, confirmTeeTime, joinRound, leaveRound } from '@/lib/callable';
 import type { Round } from '@/types/models';
+import { PlacesAutocomplete, type CoursePick } from '@/features/courses/PlacesAutocomplete';
 import { ChatThread } from '@/features/chat/ChatThread';
 import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
 import { Badge, Button, Card, Num, Rule, Spinner } from '@/components/ui';
@@ -97,6 +98,78 @@ function GroupScores({
       )}
       {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
     </Card>
+  );
+}
+
+/**
+ * The booker locks in the real tee time. Flips the post to booked/fixed and
+ * SMS-notifies everyone in the group — "chat says 7:40" becomes official.
+ */
+function ConfirmTeeTime({ postId, hasCourse }: { postId: string; hasCourse: boolean }) {
+  const [openForm, setOpenForm] = useState(false);
+  const [when, setWhen] = useState('');
+  const [course, setCourse] = useState<CoursePick | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!openForm) {
+    return (
+      <Button variant="primary" className="mt-4 w-full" onClick={() => setOpenForm(true)}>
+        Confirm the tee time
+      </Button>
+    );
+  }
+
+  async function submit() {
+    const ms = new Date(when).getTime();
+    if (!when || Number.isNaN(ms)) {
+      setError('Pick a date and time.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await confirmTeeTime({
+        postId,
+        teeTime: ms,
+        placeId: course?.placeId ?? null,
+        courseName: course?.name ?? null,
+      });
+      setOpenForm(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-sm border border-rule bg-paper-sunken p-3">
+      <p className="mb-2 text-sm text-ink">
+        Lock it in — everyone in the group gets a text.
+      </p>
+      <input
+        type="datetime-local"
+        value={when}
+        onChange={(e) => setWhen(e.target.value)}
+        className="w-full rounded-sm border border-rule-strong bg-paper px-3 py-2 text-sm text-ink"
+      />
+      {!hasCourse && (
+        <div className="mt-2">
+          <PlacesAutocomplete onSelect={setCourse} />
+          {course && <p className="mt-1 text-sm text-pine">Selected: {course.name}</p>}
+        </div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <Button variant="primary" className="flex-1" disabled={busy} onClick={submit}>
+          {busy ? '…' : 'Confirm tee time'}
+        </Button>
+        <Button variant="ghost" onClick={() => setOpenForm(false)}>
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+    </div>
   );
 }
 
@@ -216,6 +289,12 @@ export function PostDetailPage() {
           )}
         </div>
         {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+
+        {isOwner &&
+          post.booking === 'needsBooking' &&
+          (post.status === 'open' || post.status === 'full') && (
+            <ConfirmTeeTime postId={post.id} hasCourse={!!post.course.placeId} />
+          )}
       </Card>
 
       {post.status === 'completed' && (

@@ -161,6 +161,12 @@ export const leaveDraw = httpsCallable<{ day: string }, { ok: boolean }>(
   'leaveDraw',
 );
 
+// ---- Confirm a tee time on a board post / draw group (booker-only) ---------
+export const confirmTeeTime = httpsCallable<
+  { postId: string; teeTime: number; placeId?: string | null; courseName?: string | null },
+  { ok: boolean }
+>(functions, 'confirmTeeTime');
+
 // ---- Attestation (the §P3 witness — feeds minAttestedRounds eligibility) ---
 export const attestRound = httpsCallable<{ roundId: string }, { ok: boolean }>(
   functions,

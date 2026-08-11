@@ -44,6 +44,7 @@ export const enterDraw = onCall<{
 
   const ref = await db.collection('playRequests').add({
     marketId: user.marketId,
+    areas: (user as { areas?: string[] }).areas ?? [], // empty = anywhere
     userId: uid,
     displayName: user.displayName,
     index: user.handicap.index, // frozen at entry
@@ -68,6 +69,18 @@ export const leaveDraw = onCall<{ day: string }>(async (req) => {
   return { ok: true };
 });
 
+function areasCompatible(group: { areas?: string[] }[]): boolean {
+  // Empty list = plays anywhere. Otherwise every pair must share an area —
+  // downtown and Blue Springs shouldn't get drawn together unless one of
+  // them said "anywhere".
+  const listed = group.filter((r) => (r.areas?.length ?? 0) > 0);
+  if (listed.length < 2) return true;
+  const shared = listed
+    .map((r) => new Set(r.areas))
+    .reduce((acc, s) => new Set([...acc].filter((a) => s.has(a))));
+  return shared.size > 0;
+}
+
 interface Req {
   id: string;
   marketId: string;
@@ -76,6 +89,7 @@ interface Req {
   index: number;
   day: string;
   willingToBook: boolean;
+  areas?: string[];
   createdAt: Timestamp;
 }
 
@@ -112,6 +126,7 @@ export async function drawSweep(now: number) {
         const spread = candidate[candidate.length - 1].index - candidate[0].index;
         if (spread > MAX_INDEX_SPREAD) continue;
         if (!candidate.some((r) => r.willingToBook)) continue;
+        if (!areasCompatible(candidate)) continue;
         group = candidate;
         break;
       }

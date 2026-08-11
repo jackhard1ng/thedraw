@@ -41,6 +41,7 @@ async function makeUser(uid, name, index, opts = {}) {
     role: opts.role ?? 'member', organizerMarkets: opts.role === 'organizer' ? ['kc'] : [],
     canCreatePaidEvents: opts.role === 'organizer', stripeCustomerId: 'cus_x', stripeConnectId: null,
     createdAt: Timestamp.fromMillis(Date.now() - 60 * 86400000), status: 'active',
+    areas: opts.areas ?? [],
   });
 }
 
@@ -410,6 +411,50 @@ async function main() {
     check('booker is willing + earliest (p2 unwilling was not chosen)', p.createdBy !== 'p2');
     check('others joined', p.joinedUserIds.length === 1 && p.slotsFilled === 2);
     check('handicap range recorded', Array.isArray(p.handicapRange) && p.handicapRange[0] === 4.2);
+  }
+
+  // ================= FLOW F2 — areas gate + confirm tee time ================
+  console.log('\nFLOW F2 — area preferences + tee-time confirmation');
+  // Disjoint areas at the same index must NOT be grouped; overlap must.
+  await makeUser('p6', 'Ito, R.', 10.0, { areas: ['downtown'] });
+  await makeUser('p7', 'Bax, L.', 10.5, { areas: ['joco'] });
+  await call(fns.enterDraw, 'p6', { day: 'sunday' });
+  await call(fns.enterDraw, 'p7', { day: 'sunday' });
+  await drawSweep(Date.now());
+  const sunOpen1 = (await db.collection('playRequests').where('status', '==', 'open').where('day', '==', 'sunday').get())
+    .docs.map((d) => d.data().userId).sort();
+  check('disjoint areas not grouped', sunOpen1.join(',') === 'p6,p7', sunOpen1);
+
+  await makeUser('p8', 'Ott, S.', 10.2, { areas: ['joco', 'south'] });
+  await call(fns.enterDraw, 'p8', { day: 'sunday' });
+  await drawSweep(Date.now());
+  const sunMatched = (await db.collection('playRequests').where('status', '==', 'matched').where('day', '==', 'sunday').get())
+    .docs.map((d) => d.data().userId).sort();
+  check('shared area (joco) grouped p7+p8', sunMatched.join(',') === 'p7,p8', sunMatched);
+  const sunOpen2 = (await db.collection('playRequests').where('status', '==', 'open').where('day', '==', 'sunday').get())
+    .docs.map((d) => d.data().userId);
+  check('downtown-only player still waits', sunOpen2.includes('p6'), sunOpen2);
+
+  const sunPost = (await db.collection('roundPosts').where('drawMatched', '==', true).get())
+    .docs.find((d) => d.data().timing.flexibleDays?.includes('sunday'));
+  check('sunday draw post exists', !!sunPost);
+  if (sunPost) {
+    const booker = sunPost.data().createdBy;
+    const nonBooker = booker === 'p7' ? 'p8' : 'p7';
+    let denied = false;
+    try { await call(fns.confirmTeeTime, nonBooker, { postId: sunPost.id, teeTime: Date.now() + 86400000 }); }
+    catch { denied = true; }
+    check('only the booker confirms the tee time', denied);
+    let pastRejected = false;
+    try { await call(fns.confirmTeeTime, booker, { postId: sunPost.id, teeTime: Date.now() - 1000 }); }
+    catch { pastRejected = true; }
+    check('past tee time rejected', pastRejected);
+    const tee = Date.now() + 3 * 86400000;
+    await call(fns.confirmTeeTime, booker, { postId: sunPost.id, teeTime: tee, placeId: 'netCourse', courseName: 'Net Test CC' });
+    const after = (await sunPost.ref.get()).data();
+    check('post flips to booked + fixed time', after.booking === 'booked' && after.timing.mode === 'fixed'
+      && after.timing.fixedTime.toMillis() === tee && after.course.placeId === 'netCourse',
+      { booking: after.booking, mode: after.timing.mode });
   }
 
   // ================= FLOW G — stroke rules: frozen handicap + net ============

@@ -10,7 +10,9 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Card, Num } from '@/components/ui';
 import { enterDraw, leaveDraw } from '@/lib/callable';
+import { areaLabel } from '@/lib/areas';
 import type { PlayRequest } from '@/types/models';
+import { Link } from 'react-router-dom';
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'saturday', label: 'Sat' },
@@ -67,6 +69,16 @@ export function DrawCard() {
       </div>
       <p className="mt-1 text-sm text-ink-soft">
         One tap. We group you with players near your level and name who books.
+      </p>
+      <p className="mt-1 text-xs text-ink-faint">
+        {(profile?.areas?.length ?? 0) > 0 ? (
+          <>Matching in: {profile!.areas!.map((a) => areaLabel(marketId, a)).join(', ')} · </>
+        ) : (
+          <>Matching anywhere in the metro · </>
+        )}
+        <Link to="/profile" className="text-tournament underline underline-offset-2">
+          set your areas
+        </Link>
       </p>
 
       <div className="mt-3 flex items-center gap-2">

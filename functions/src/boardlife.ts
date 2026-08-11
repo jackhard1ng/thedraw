@@ -77,6 +77,56 @@ export async function boardSweep(now: number) {
 }
 
 // ---------------------------------------------------------------------------
+// confirmTeeTime — the booker locks in the actual tee time on a post (board
+// post or draw group). Flips booking to "booked", pins the fixed time, and
+// SMS-notifies everyone in the group: the round is real now.
+// ---------------------------------------------------------------------------
+export const confirmTeeTime = onCall<{
+  postId: string;
+  teeTime: number; // epoch ms
+  placeId?: string | null;
+  courseName?: string | null;
+}>(async (req) => {
+  const uid = requireAuth(req.auth);
+  await requireActive(uid);
+  const ref = db.doc(`roundPosts/${req.data.postId}`);
+  const post = (await ref.get()).data() as
+    | { createdBy: string; joinedUserIds: string[]; status: string; course: { placeId: string | null } }
+    | undefined;
+  if (!post) throw new HttpsError('not-found', 'Post not found.');
+  if (post.createdBy !== uid) {
+    throw new HttpsError('permission-denied', 'The booker (post creator) confirms the tee time.');
+  }
+  if (post.status !== 'open' && post.status !== 'full') {
+    throw new HttpsError('failed-precondition', 'This round is closed.');
+  }
+  if (!req.data.teeTime || req.data.teeTime < Date.now()) {
+    throw new HttpsError('invalid-argument', 'Pick a future tee time.');
+  }
+  await ref.update({
+    'timing.mode': 'fixed',
+    'timing.fixedTime': Timestamp.fromMillis(req.data.teeTime),
+    'timing.flexibleDays': null,
+    booking: 'booked',
+    ...(req.data.placeId ? { 'course.placeId': req.data.placeId, 'course.mode': 'specific' } : {}),
+  });
+  const when = new Date(req.data.teeTime).toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    timeZone: 'America/Chicago',
+  });
+  for (const u of post.joinedUserIds) {
+    await notify({
+      userId: u,
+      title: 'Tee time confirmed',
+      body: `${when}${req.data.courseName ? ` at ${req.data.courseName}` : ''} — you're locked in.`,
+      deadlineCritical: true,
+      link: `/post/${req.data.postId}`,
+    });
+  }
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
 // 1 — attestRound: a groupmate vouches for a score (§P3 witness)
 // ---------------------------------------------------------------------------
 export const attestRound = onCall<{ roundId: string }>(async (req) => {
