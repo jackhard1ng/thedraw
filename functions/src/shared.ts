@@ -77,7 +77,9 @@ export async function deriveStats(uid: string, now: number) {
     attestedRounds: rounds.size,
     attendanceRate: committed === 0 ? 1 : played / committed,
     accountAgeDays: user.createdAt ? (now - user.createdAt.toMillis()) / 86_400_000 : 0,
-    hasPaymentMethod: !!user.stripeCustomerId,
+    // Card details are collected inline at entry (Stripe Elements), so a
+    // missing saved card is never a reason to block an entry.
+    hasPaymentMethod: true,
   };
 }
 

@@ -1,28 +1,26 @@
 /**
- * Save a card for one-tap re-entry (spec §5). Uses a Stripe SetupIntent — the
- * wallet UX with none of the stored-value exposure (§7). The callable returns a
- * clientSecret; confirming it with Stripe Elements is stubbed here (Phase 3),
- * where a <CardElement> + stripe.confirmCardSetup(clientSecret, …) would attach
- * the payment method. For now we call the callable and confirm the secret exists.
+ * Save a card for one-tap re-entry (spec §5). A Stripe SetupIntent confirmed
+ * with real Elements — the wallet UX with none of the stored-value exposure
+ * (§7). The card lives with Stripe; The Draw never sees the number.
  */
 import { useState } from 'react';
 import { Button, Card, SectionHeader } from '@/components/ui';
 import { createSetupIntent } from '@/lib/callable';
+import { stripeClientEnabled } from '@/lib/stripeClient';
+import { PaymentSheet } from './PaymentSheet';
 
 export function SavedCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
-  async function saveCard() {
+  async function begin() {
     setBusy(true);
     setError(null);
     try {
       const res = await createSetupIntent({});
-      // Phase 3: pass res.data.clientSecret to Stripe Elements
-      //   stripe.confirmCardSetup(clientSecret, { payment_method: { card } })
-      // to attach the card off-session. We assert the secret came back here.
-      if (res.data.clientSecret) setReady(true);
+      setClientSecret(res.data.clientSecret);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -40,12 +38,26 @@ export function SavedCard() {
           balance (§7).
         </p>
 
-        {ready ? (
+        {saved ? (
           <div className="mt-4 rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm text-pine">
-            Setup authorized. Card entry (Stripe Elements) is wired in Phase 3.
+            Card saved. Future entries can charge it with one tap.
           </div>
+        ) : clientSecret ? (
+          <div className="mt-5">
+            <PaymentSheet
+              clientSecret={clientSecret}
+              mode="setup"
+              submitLabel="Save card"
+              onSuccess={() => setSaved(true)}
+              onCancel={() => setClientSecret(null)}
+            />
+          </div>
+        ) : !stripeClientEnabled() ? (
+          <p className="mt-4 text-sm text-ink-faint">
+            Card payments aren't available yet on this deployment.
+          </p>
         ) : (
-          <Button variant="primary" className="mt-5 w-full" disabled={busy} onClick={saveCard}>
+          <Button variant="primary" className="mt-5 w-full" disabled={busy} onClick={begin}>
             {busy ? 'Preparing…' : 'Save a card'}
           </Button>
         )}

@@ -266,7 +266,15 @@ export interface Tournament {
 // ---------------------------------------------------------------------------
 // entries/{entryId}
 // ---------------------------------------------------------------------------
-export type PaymentStatus = 'authorized' | 'captured' | 'refunded';
+export type PaymentStatus =
+  | 'pending' // free-event placeholder before the server resolves it
+  | 'pendingAuthorization' // slot reserved; card form not yet completed
+  | 'authorized' // card held (manual capture) — charged only at close
+  | 'methodSaved' // long window: card saved, charged at close
+  | 'captured'
+  | 'captureFailed'
+  | 'lapsed' // pendingAuthorization at close — spot released, never charged
+  | 'refunded';
 export type EntryStatus = 'active' | 'eliminated' | 'withdrawn' | 'forfeited';
 
 export interface Entry {

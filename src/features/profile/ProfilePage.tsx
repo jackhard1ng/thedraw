@@ -29,7 +29,80 @@ import { Badge, Button, Card, Num, Rule, SectionHeader, Spinner } from '@/compon
 import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { areasFor } from '@/lib/areas';
 import { formatTeeTime } from '@/lib/format';
+import { formatCents } from '@/lib/money';
 import type { ReputationEvent, Round } from '@/types/models';
+
+const PLACEMENT_LABEL: Record<string, string> = {
+  champion: 'Champion',
+  runnerUp: 'Runner-up',
+  semifinalist: 'Semifinalist',
+  quarterfinalist: 'Quarterfinalist',
+  podWinner: 'Pod winner',
+  flightWinner: 'Flight winner',
+};
+
+interface AwardRow {
+  id: string;
+  tournamentName: string;
+  season: string;
+  placement: string;
+  flight: string | null;
+  amountCents: number | null;
+}
+
+/** The trophy shelf — placements and real dollars, from the append-only awards. */
+function AwardsList({ userId }: { userId: string }) {
+  const [awards, setAwards] = useState<AwardRow[] | null>(null);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'awards'),
+      where('userId', '==', userId),
+      orderBy('awardedAt', 'desc'),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setAwards(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AwardRow, 'id'>) }))),
+      () => setAwards([]),
+    );
+  }, [userId]);
+
+  if (awards === null) return null;
+  if (awards.length === 0) {
+    return (
+      <p className="text-sm text-ink-faint">
+        No placements yet — they land here the moment an event completes.
+      </p>
+    );
+  }
+  const totalCents = awards.reduce((a, w) => a + (w.amountCents ?? 0), 0);
+  return (
+    <div>
+      {totalCents > 0 && (
+        <p className="mb-2 text-sm text-ink">
+          Career winnings: <Num className="text-pine">{formatCents(totalCents)}</Num>
+        </p>
+      )}
+      <div className="divide-y divide-rule">
+        {awards.map((w) => (
+          <div key={w.id} className="flex items-center justify-between py-2 text-sm">
+            <div className="min-w-0">
+              <p className="truncate text-ink">
+                {PLACEMENT_LABEL[w.placement] ?? w.placement}
+                {w.flight ? ` · ${w.flight}` : ''}
+              </p>
+              <p className="text-xs text-ink-faint">
+                {w.tournamentName} · {w.season}
+              </p>
+            </div>
+            {w.amountCents != null && w.amountCents > 0 && (
+              <Num className="shrink-0 text-pine">{formatCents(w.amountCents)}</Num>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function ReputationLine({ userId }: { userId: string }) {
   const [events, setEvents] = useState<ReputationEvent[] | null>(null);
@@ -371,6 +444,12 @@ export function ProfilePage() {
       <div className="mt-6">
         <SectionHeader>Reliability</SectionHeader>
         <ReputationLine userId={fbUser.uid} />
+      </div>
+
+      {/* The competitive record — placements and winnings (the product's moat) */}
+      <div className="mt-6">
+        <SectionHeader>Record</SectionHeader>
+        <AwardsList userId={fbUser.uid} />
       </div>
 
       {/* Self-reported rounds — visually separate, clearly labeled (§4) */}

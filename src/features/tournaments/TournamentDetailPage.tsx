@@ -32,7 +32,8 @@ import {
   checkEligibility,
   type DerivedStats,
 } from '@/lib/eligibility';
-import { enterTournament, withdrawEntry } from '@/lib/callable';
+import { confirmEntryPayment, enterTournament, withdrawEntry } from '@/lib/callable';
+import { PaymentSheet } from '@/features/payments/PaymentSheet';
 import type { Format, Scoring } from '@/types/models';
 import {
   useFormat,
@@ -139,7 +140,14 @@ export function TournamentDetailPage() {
   const [reg, setReg] = useState<RegistrationValue>({ partnerId: '', teamName: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // A paid entry in progress: the server has reserved the slot and handed back
+  // a clientSecret; the card form below completes (or abandons) it.
+  const [pendingPayment, setPendingPayment] = useState<{
+    entryId: string;
+    clientSecret: string;
+    paymentMode: 'authorize' | 'setup';
+  } | null>(null);
+  const [justEntered, setJustEntered] = useState(false);
 
   // Best-effort derived stats for the courtesy eligibility check. The Cloud
   // Function recomputes these authoritatively; here we approximate and lean
@@ -193,7 +201,8 @@ export function TournamentDetailPage() {
         accountAgeDays: profile.createdAt
           ? (Date.now() - profile.createdAt.toMillis()) / DAY
           : 9999,
-        hasPaymentMethod: profile.stripeCustomerId != null,
+        // Card details are collected inline at entry — never a blocker.
+        hasPaymentMethod: true,
       }
     : null;
 
@@ -216,10 +225,15 @@ export function TournamentDetailPage() {
           ? { partnerId: reg.partnerId, teamName: reg.teamName || undefined }
           : {}),
       });
-      // Phase 3: if a clientSecret comes back, this is where Stripe Elements
-      // would confirm the PaymentIntent. For now we surface that payment was
-      // authorized. (Elements wiring is deferred to Phase 3.)
-      setClientSecret(res.data.clientSecret);
+      if (res.data.clientSecret && res.data.paymentMode) {
+        setPendingPayment({
+          entryId: res.data.entryId,
+          clientSecret: res.data.clientSecret,
+          paymentMode: res.data.paymentMode,
+        });
+      } else {
+        setJustEntered(true); // free event — entered outright
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -360,7 +374,14 @@ export function TournamentDetailPage() {
             <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-faint">
               The fee covers entry collection, the draw, scheduling and results
               machinery, dispute arbitration, and automatic payout to winners.
-              It is capped at $20 per entry and never scales with the purse.
+              It is capped at $20 per entry and never scales with the purse; on
+              very small fields a $10-per-event minimum applies, taken from the
+              pool before payouts.
+            </p>
+            <p className="mt-2 text-xs text-pine">
+              You're only charged if the event runs. Enter and your card is held
+              (or saved, for longer windows); if the field falls short at close,
+              nothing is collected.
             </p>
           </Card>
         )}
@@ -401,23 +422,79 @@ export function TournamentDetailPage() {
       )}
 
       {/* Eligibility + enter */}
-      {myEntry ? (
+      {pendingPayment ? (
+        <Card className="p-4">
+          <p className="mb-1 font-display uppercase tracking-wide text-sm text-ink">
+            {pendingPayment.paymentMode === 'authorize'
+              ? `Hold ${formatCents(tournament.entryFeeCents)} on your card`
+              : 'Save your card for this entry'}
+          </p>
+          <p className="mb-4 text-xs text-ink-faint">
+            {pendingPayment.paymentMode === 'authorize'
+              ? "Your card is held, not charged. It's only charged when registration closes and the event runs; if the field falls short, the hold is released in full."
+              : 'Registration closes more than 5 days out, so your card is saved now and charged only when the event runs. If the field falls short, nothing is charged.'}
+          </p>
+          <PaymentSheet
+            clientSecret={pendingPayment.clientSecret}
+            mode={pendingPayment.paymentMode}
+            submitLabel={
+              pendingPayment.paymentMode === 'authorize'
+                ? `Hold ${formatCents(tournament.entryFeeCents)}`
+                : 'Save card & enter'
+            }
+            onSuccess={async () => {
+              await confirmEntryPayment({ entryId: pendingPayment.entryId });
+              setPendingPayment(null);
+              setJustEntered(true);
+            }}
+            onCancel={async () => {
+              // Abandoning the card form abandons the entry — release the slot
+              // instead of leaving a pending entry to lapse at close.
+              try {
+                await withdrawEntry({ entryId: pendingPayment.entryId });
+              } catch {
+                /* close may have passed; the lapse sweep cleans up */
+              }
+              setPendingPayment(null);
+            }}
+          />
+        </Card>
+      ) : myEntry ? (
         <div className="space-y-3">
           <div className="rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm text-pine">
-            You are entered ({myEntry.paymentStatus}). Seed{' '}
-            <Num>{myEntry.seed || '—'}</Num>.
+            {myEntry.paymentStatus === 'pendingAuthorization' ? (
+              <>Your spot is reserved but payment was never completed — withdraw and re-enter to fix it.</>
+            ) : (
+              <>
+                You're in.{' '}
+                {myEntry.paymentStatus === 'authorized'
+                  ? 'Your card is held; it is charged only when the event runs.'
+                  : myEntry.paymentStatus === 'methodSaved'
+                    ? 'Your card is saved; it is charged only when the event runs.'
+                    : myEntry.paymentStatus === 'captured'
+                      ? 'Entry fee collected.'
+                      : ''}
+                {myEntry.seed ? (
+                  <>
+                    {' '}Seed <Num>{myEntry.seed}</Num>.
+                  </>
+                ) : null}
+              </>
+            )}
           </div>
-          <Button variant="ghost" className="w-full" disabled={busy} onClick={onWithdraw}>
-            {busy ? '…' : 'Withdraw entry'}
-          </Button>
+          {tournament.status === 'open' && (
+            <Button variant="ghost" className="w-full" disabled={busy} onClick={onWithdraw}>
+              {busy ? '…' : 'Withdraw entry'}
+            </Button>
+          )}
         </div>
-      ) : clientSecret !== null ? (
+      ) : justEntered ? (
         <div className="rounded-sm border border-pine/40 bg-pine/10 p-4 text-sm text-pine">
-          <p className="font-display uppercase tracking-wide">Payment authorized</p>
+          <p className="font-display uppercase tracking-wide">You're in</p>
           <p className="mt-1 text-ink-soft">
             {free
               ? 'You are entered.'
-              : 'Your card was authorized for the entry fee (not yet captured). Real Stripe Elements confirmation is wired in Phase 3.'}
+              : "Payment complete — you're entered. Your card is only charged when the event runs."}
           </p>
         </div>
       ) : (

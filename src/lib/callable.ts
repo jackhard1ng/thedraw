@@ -80,8 +80,14 @@ export const cancelTournament = httpsCallable<{ tournamentId: string }, { ok: bo
 // Enter: singles or a team (partnerId for a one-off, teamId for a persistent team).
 export const enterTournament = httpsCallable<
   { tournamentId: string; partnerId?: string; teamId?: string; teamName?: string },
-  { entryId: string; clientSecret: string | null }
+  { entryId: string; clientSecret: string | null; paymentMode: 'authorize' | 'setup' | null }
 >(functions, 'enterTournament');
+// After Stripe Elements succeeds, this verifies with Stripe and flips the
+// entry to its real payment state (authorized / methodSaved).
+export const confirmEntryPayment = httpsCallable<
+  { entryId: string },
+  { status: string }
+>(functions, 'confirmEntryPayment');
 export const withdrawEntry = httpsCallable<{ entryId: string }, { ok: boolean }>(
   functions,
   'withdrawEntry',
@@ -280,3 +286,9 @@ export const createSetupIntent = httpsCallable<
   Record<string, never>,
   { clientSecret: string }
 >(functions, 'createSetupIntent');
+// Asks Stripe whether Connect onboarding is actually finished (payouts_enabled),
+// not merely whether a link was once created.
+export const checkPayoutStatus = httpsCallable<
+  Record<string, never>,
+  { onboarded: boolean }
+>(functions, 'checkPayoutStatus');

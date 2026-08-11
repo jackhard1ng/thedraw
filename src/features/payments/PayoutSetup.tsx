@@ -1,18 +1,35 @@
 /**
  * Payout setup — Stripe Connect Express onboarding (spec §7). Winnings pay out to
- * the player's OWN connected account; The Draw never holds a balance. The
- * callable returns a hosted onboarding URL we send them to.
+ * the player's OWN connected account; The Draw never holds a balance.
+ *
+ * "Set up" here means what Stripe says it means: we ask checkPayoutStatus
+ * (payouts_enabled on the real account), never just "an onboarding link was
+ * created once". A half-finished onboarding shows as unfinished, with the way
+ * back in one tap. Any prize that was waiting pays out automatically within
+ * the hour once onboarding completes.
  */
-import { useState } from 'react';
-import { Button, Card, SectionHeader } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { Button, Card, SectionHeader, Spinner } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
-import { createConnectOnboardingLink } from '@/lib/callable';
+import { checkPayoutStatus, createConnectOnboardingLink } from '@/lib/callable';
 
 export function PayoutSetup() {
   const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const connected = profile?.stripeConnectId != null;
+  // undefined = still asking Stripe; false covers "never started" AND
+  // "started but abandoned the form" — the difference is the button label.
+  const [onboarded, setOnboarded] = useState<boolean | undefined>(
+    profile?.stripeConnectId ? undefined : false,
+  );
+  const started = profile?.stripeConnectId != null;
+
+  useEffect(() => {
+    if (!started) return;
+    checkPayoutStatus({})
+      .then((res) => setOnboarded(res.data.onboarded))
+      .catch(() => setOnboarded(false));
+  }, [started]);
 
   async function start() {
     setBusy(true);
@@ -38,14 +55,27 @@ export function PayoutSetup() {
           itemized tournament administration fee disclosed at entry (§7).
         </p>
 
-        {connected ? (
+        {onboarded === undefined ? (
+          <div className="mt-4">
+            <Spinner />
+          </div>
+        ) : onboarded ? (
           <div className="mt-4 rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm text-pine">
-            Payouts are set up. You're ready to receive winnings.
+            Payouts are active. Winnings land in your bank automatically —
+            anything that was waiting pays out within the hour.
           </div>
         ) : (
-          <Button variant="primary" className="mt-5 w-full" disabled={busy} onClick={start}>
-            {busy ? 'Opening Stripe…' : 'Set up payouts with Stripe'}
-          </Button>
+          <>
+            {started && (
+              <p className="mt-4 text-sm text-tournament">
+                Onboarding was started but not finished — Stripe can't pay you
+                yet. Pick up where you left off:
+              </p>
+            )}
+            <Button variant="primary" className="mt-4 w-full" disabled={busy} onClick={start}>
+              {busy ? 'Opening Stripe…' : started ? 'Finish payout setup' : 'Set up payouts with Stripe'}
+            </Button>
+          </>
         )}
         {error && <p className="mt-3 text-sm text-tournament">{error}</p>}
       </Card>

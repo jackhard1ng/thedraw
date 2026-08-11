@@ -74,6 +74,36 @@ export async function maybeCompleteTournament(tournamentId: string) {
     awardsToWrite.push(...done.awards);
   }
 
+  // --- Payout math first, so awards can carry each member's real share ------
+  // memberShare: `${entryId}:${uid}` → cents. Empty for free events.
+  const memberShare = new Map<string, number>();
+  let assignments: { entryId: string; amountCents: number; division: string; place: number }[] = [];
+  const isCash = t.entryFeeCents > 0 && t.prizeType === 'cashPurse';
+  if (isCash) {
+    const activeCount = entries.filter((e) => e.status !== 'withdrawn').length;
+    const { adminCents } = itemizeEntry(t.entryFeeCents, t.adminFeePercent);
+    const collected = t.entryFeeCents * activeCount;
+    const adminT =
+      t.adminFeePercent > 0
+        ? Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS)
+        : 0;
+    const pool = Math.max(0, collected - adminT);
+    assignments = computePayouts(pool, t.payoutTable as PayoutRow[], standings, t.doubleDipRule);
+    for (const a of assignments) {
+      const e = entries.find((x) => x.id === a.entryId);
+      if (!e) continue;
+      // Addendum §3: team prizes split EVENLY and paid INDIVIDUALLY.
+      const base = Math.floor(a.amountCents / e.userIds.length);
+      e.userIds.forEach((u, i) =>
+        memberShare.set(
+          `${a.entryId}:${u}`,
+          (memberShare.get(`${a.entryId}:${u}`) ?? 0) +
+            (i === 0 ? a.amountCents - base * (e.userIds.length - 1) : base),
+        ),
+      );
+    }
+  }
+
   // --- Awards (append-only) ---
   const season = seasonLabel((t.registrationCloses as Timestamp).toMillis());
   for (const a of awardsToWrite) {
@@ -89,13 +119,16 @@ export async function maybeCompleteTournament(tournamentId: string) {
         flight: a.flight,
         placement: a.placement,
         path: a.path,
+        // The member's own dollar share (ties and team splits already applied),
+        // so "champion · $162" needs no reconciliation against the payout grid.
+        amountCents: memberShare.get(`${a.entryId}:${u}`) ?? null,
         awardedAt: FieldValue.serverTimestamp(),
       });
     }
   }
 
   // --- Payouts (only for cash-purse events) ---
-  if (t.entryFeeCents > 0 && t.prizeType === 'cashPurse') {
+  if (isCash) {
     const activeCount = entries.filter((e) => e.status !== 'withdrawn').length;
     const { adminCents } = itemizeEntry(t.entryFeeCents, t.adminFeePercent);
     // Addendum §1: minimum admin fee of $10 PER EVENT so a tiny field doesn't
@@ -108,7 +141,7 @@ export async function maybeCompleteTournament(tournamentId: string) {
       t.adminFeePercent > 0
         ? Math.max(adminCents * activeCount, MIN_EVENT_ADMIN_FEE_CENTS)
         : 0;
-    const poolCents = Math.max(0, collectedCents - adminTotal);
+    // (The prize pool itself was computed above, before awards were written.)
 
     // City-organizer revenue share (spec Phase 5): the market's organizer —
     // the human doing the regulation labor (verifying handicaps, resolving
@@ -142,32 +175,49 @@ export async function maybeCompleteTournament(tournamentId: string) {
         await writeLedger({ type: 'adminFee', amountCents: orgCut, fromUserId: null, toUserId: market.marketOrganizerId, tournamentId, matchId: null, stripeRef, note: `market organizer share (${market.organizerSharePercent}% of admin)` });
       }
     }
-    const assignments = computePayouts(poolCents, t.payoutTable as PayoutRow[], standings, t.doubleDipRule);
     for (const a of assignments) {
       const e = entries.find((x) => x.id === a.entryId);
       if (!e) continue;
-      // Addendum §3: team prizes split EVENLY among members and are paid
-      // INDIVIDUALLY — never lumped to the captain. $360 to a duo = 2 × $180.
       const members = e.userIds;
-      const base = Math.floor(a.amountCents / members.length);
-      const shares = members.map((_, i) =>
-        i === 0 ? a.amountCents - base * (members.length - 1) : base,
-      );
       for (let i = 0; i < members.length; i++) {
         const member = members[i];
-        const share = shares[i];
+        const share = memberShare.get(`${a.entryId}:${member}`) ?? 0;
         if (share <= 0) continue;
+        const dollars = `$${(share / 100).toFixed(2)}`;
         const user = (await db.doc(`users/${member}`).get()).data() as { stripeConnectId: string | null } | undefined;
         let stripeRef = 'pending-onboarding';
         if (stripeEnabled() && user?.stripeConnectId) {
           try {
             const tr = await stripePayout({ amountCents: share, destinationConnectId: user.stripeConnectId, tournamentId, toUserId: member });
             stripeRef = tr.id;
+            await notify({
+              userId: member,
+              title: `You won ${dollars}`,
+              body: `${t.name}: your prize is on its way to your bank. The Draw holds nothing.`,
+              deadlineCritical: true,
+              link: '/me',
+            });
           } catch (err) {
+            // Connect account exists but can't receive yet (onboarding
+            // unfinished). The row stays pending; the hourly settle sweep
+            // retries until it lands — and the winner is told what to do.
             console.error(`payout failed for ${member}: ${(err as Error).message}`);
+            await notify({
+              userId: member,
+              title: `You won ${dollars} — action needed`,
+              body: `${t.name}: finish payout setup to receive your prize. It retries automatically once you're set up.`,
+              deadlineCritical: true,
+              link: '/payouts',
+            });
           }
         } else {
-          await notify({ userId: member, title: 'You won — set up payouts', body: 'Set up payouts to receive your prize. The Draw never holds your money.', deadlineCritical: true, link: '/payouts' });
+          await notify({
+            userId: member,
+            title: `You won ${dollars} — set up payouts`,
+            body: `${t.name}: set up payouts to receive your prize. It pays out automatically once you're set up. The Draw never holds your money.`,
+            deadlineCritical: true,
+            link: '/payouts',
+          });
         }
         await writeLedger({ type: 'payout', amountCents: share, fromUserId: null, toUserId: member, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}${members.length > 1 ? ` (team split ${i + 1}/${members.length})` : ''}` });
       }

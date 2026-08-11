@@ -18,6 +18,7 @@ import { maybeCompleteTournament } from './completion';
 import { boardSweep } from './boardlife';
 import { drawSweep } from './draw';
 import { notify } from './lib/notify';
+import { accountPayoutsEnabled, payout as stripePayout, stripeEnabled } from './lib/stripe';
 
 export const tick = onSchedule('every 60 minutes', async () => {
   const now = Date.now();
@@ -29,7 +30,52 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await bookingWindowSweep(now);
   await boardSweep(now);
   await drawSweep(now);
+  await settlePendingPayouts();
 });
+
+/**
+ * Money owed but not yet deliverable — a winner who hadn't finished Connect
+ * onboarding at completion time — is retried here every hour until it lands.
+ * This is the guarantee behind "winners are paid automatically": finishing
+ * onboarding is the ONLY step, and nobody has to ask anyone for their money.
+ */
+async function settlePendingPayouts() {
+  if (!stripeEnabled()) return;
+  const rows = await db
+    .collection('ledger')
+    .where('stripeRef', '==', 'pending-onboarding')
+    .limit(50)
+    .get();
+  for (const d of rows.docs) {
+    const row = d.data() as { toUserId: string | null; amountCents: number; tournamentId: string | null };
+    if (!row.toUserId) continue;
+    const user = (await db.doc(`users/${row.toUserId}`).get()).data() as
+      | { stripeConnectId: string | null }
+      | undefined;
+    if (!user?.stripeConnectId) continue; // still not onboarded — keep waiting
+    try {
+      if (!(await accountPayoutsEnabled(user.stripeConnectId))) continue;
+      const tr = await stripePayout({
+        amountCents: row.amountCents,
+        destinationConnectId: user.stripeConnectId,
+        tournamentId: row.tournamentId ?? '',
+        toUserId: row.toUserId,
+      });
+      // Settlement update, not a mutation of history: the row records the same
+      // debt — stripeRef flips from the pending marker to the real transfer.
+      await d.ref.update({ stripeRef: tr.id, settledAt: Timestamp.now() });
+      await notify({
+        userId: row.toUserId,
+        title: `$${(row.amountCents / 100).toFixed(2)} on the way`,
+        body: 'Payout setup complete — your prize money just went out to your bank.',
+        deadlineCritical: true,
+        link: '/me',
+      });
+    } catch (e) {
+      console.error(`settle failed for ledger ${d.id}: ${(e as Error).message}`);
+    }
+  }
+}
 
 /**
  * Booking-window notifications (§5): for supported courses, compute when

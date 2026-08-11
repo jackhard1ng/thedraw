@@ -34,6 +34,11 @@ import { makePods } from './engine/pods';
 import {
   authorizeEntryFee,
   captureIntent,
+  chargeSavedMethod,
+  createSetupIntent,
+  refundIntent,
+  retrievePaymentIntent,
+  retrieveSetupIntent,
   voidIntent,
   ensureCustomer,
   stripeEnabled,
@@ -299,8 +304,15 @@ export const enterTournament = onCall(async (req) => {
     tx.update(tRef, { entryIds: FieldValue.arrayUnion(entryRef.id) });
   });
 
-  // Authorize the entry fee (manual capture) — only when payments are live.
+  // Payment setup — only when payments are live. Two modes (§4 entries):
+  //   authorize — close is soon: hold the card now, capture at close.
+  //   setup     — close is >5 days out (card holds expire ~7d): save the
+  //               method now, charge at close. Same promise either way:
+  //               charged only if the event runs.
+  // Either way the entry is NOT authorized until the player completes the
+  // card form (confirmEntryPayment flips it) — no phantom "authorized" states.
   let clientSecret: string | null = null;
+  let paymentMode: 'authorize' | 'setup' | null = null;
   if (isPaid) {
     if (!stripeEnabled()) {
       // Compensate: back out the entry rather than leaving a phantom.
@@ -315,23 +327,84 @@ export const enterTournament = onCall(async (req) => {
     if (customerId !== user.stripeCustomerId) {
       await db.doc(`users/${uid}`).update({ stripeCustomerId: customerId });
     }
+    const AUTH_HOLD_MAX_MS = 5 * 86_400_000;
+    const closesMs = (t.registrationCloses as Timestamp).toMillis();
+    paymentMode = closesMs - Date.now() > AUTH_HOLD_MAX_MS ? 'setup' : 'authorize';
     try {
-      const pi = await authorizeEntryFee({
-        amountCents: t.entryFeeCents,
-        customerId,
-        tournamentId,
-        entryId: entryRef.id,
-      });
-      clientSecret = pi.client_secret ?? null;
-      await entryRef.update({ paymentIntentId: pi.id, paymentStatus: 'authorized' });
+      if (paymentMode === 'authorize') {
+        const pi = await authorizeEntryFee({
+          amountCents: t.entryFeeCents,
+          customerId,
+          tournamentId,
+          entryId: entryRef.id,
+        });
+        clientSecret = pi.client_secret ?? null;
+        await entryRef.update({
+          paymentIntentId: pi.id,
+          paymentStatus: 'pendingAuthorization',
+          paymentMode,
+        });
+      } else {
+        const si = await createSetupIntent(customerId);
+        clientSecret = si.client_secret ?? null;
+        await entryRef.update({
+          setupIntentId: si.id,
+          paymentStatus: 'pendingAuthorization',
+          paymentMode,
+        });
+      }
     } catch (e) {
       await backOutEntry(tournamentId, entryRef.id);
-      throw new HttpsError('internal', `Payment authorization failed: ${(e as Error).message}`);
+      throw new HttpsError('internal', `Payment setup failed: ${(e as Error).message}`);
     }
   }
 
   // Reputation: committing to an event you entered.
-  return { entryId: entryRef.id, clientSecret };
+  return { entryId: entryRef.id, clientSecret, paymentMode };
+});
+
+// ---------------------------------------------------------------------------
+// confirmEntryPayment — the client calls this after Stripe Elements succeeds.
+// Verifies against Stripe (never trusts the client) and flips the entry to its
+// real payment state. An entry left at pendingAuthorization lapses at close.
+// ---------------------------------------------------------------------------
+export const confirmEntryPayment = onCall<{ entryId: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const eRef = db.doc(`entries/${req.data.entryId}`);
+  const e = (await eRef.get()).data() as
+    | {
+        captainId: string;
+        paymentMode?: 'authorize' | 'setup';
+        paymentIntentId: string | null;
+        setupIntentId?: string;
+        paymentStatus: string;
+      }
+    | undefined;
+  if (!e) throw new HttpsError('not-found', 'Entry not found.');
+  if (e.captainId !== uid) throw new HttpsError('permission-denied', 'Not your entry.');
+  if (e.paymentStatus !== 'pendingAuthorization') return { status: e.paymentStatus };
+
+  if (e.paymentMode === 'setup' && e.setupIntentId) {
+    const si = await retrieveSetupIntent(e.setupIntentId);
+    if (si.status !== 'succeeded' || !si.payment_method) {
+      throw new HttpsError('failed-precondition', 'Card was not saved — try again.');
+    }
+    await eRef.update({
+      paymentStatus: 'methodSaved',
+      paymentMethodId: typeof si.payment_method === 'string' ? si.payment_method : si.payment_method.id,
+    });
+    return { status: 'methodSaved' };
+  }
+
+  if (e.paymentIntentId) {
+    const pi = await retrievePaymentIntent(e.paymentIntentId);
+    if (pi.status !== 'requires_capture') {
+      throw new HttpsError('failed-precondition', 'Payment was not completed — try again.');
+    }
+    await eRef.update({ paymentStatus: 'authorized' });
+    return { status: 'authorized' };
+  }
+  throw new HttpsError('failed-precondition', 'No payment on this entry.');
 });
 
 async function backOutEntry(tournamentId: string, entryId: string) {
@@ -350,8 +423,17 @@ export const withdrawEntry = onCall<{ entryId: string }>(async (req) => {
   const t = (await db.doc(`tournaments/${e.tournamentId}`).get()).data() as { status: string } | undefined;
   if (t?.status !== 'open') throw new HttpsError('failed-precondition', 'Too late to withdraw.');
 
-  if (e.paymentIntentId && e.paymentStatus === 'authorized' && stripeEnabled()) {
-    await voidIntent(e.paymentIntentId); // release the hold; no charge
+  if (
+    e.paymentIntentId &&
+    (e.paymentStatus === 'authorized' || e.paymentStatus === 'pendingAuthorization') &&
+    stripeEnabled()
+  ) {
+    try {
+      await voidIntent(e.paymentIntentId); // release the hold; no charge
+    } catch (err) {
+      // The withdrawal still stands; the hold falls off on its own within days.
+      console.error(`void on withdraw failed for ${req.data.entryId}: ${(err as Error).message}`);
+    }
   }
   await db.doc(`tournaments/${e.tournamentId}`).update({ entryIds: FieldValue.arrayRemove(req.data.entryId) });
   await eRef.update({ status: 'withdrawn' });
@@ -379,7 +461,30 @@ export async function runClose(tournamentId: string) {
   if (!t || (t.status !== 'open' && t.status !== 'filled')) return;
 
   const entriesSnap = await db.collection('entries').where('tournamentId', '==', tournamentId).where('status', '==', 'active').get();
-  const entries = entriesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  let entries = entriesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+  const isPaid = t.entryFeeCents > 0;
+
+  // Entries whose payment was never completed lapse at close — they were never
+  // committed money, so they don't count toward the field and aren't seeded.
+  if (isPaid) {
+    const lapsed = entries.filter((e) => e.paymentStatus === 'pendingAuthorization');
+    for (const e of lapsed) {
+      if (e.paymentIntentId && stripeEnabled()) {
+        try { await voidIntent(e.paymentIntentId); } catch { /* nothing was held */ }
+      }
+      await db.doc(`entries/${e.id}`).update({ status: 'withdrawn', paymentStatus: 'lapsed' });
+      await tRef.update({ entryIds: FieldValue.arrayRemove(e.id) });
+      await notify({
+        userId: e.captainId,
+        title: `${t.name}: entry dropped`,
+        body: 'Your card details were never completed, so your spot was released. You were not charged.',
+        deadlineCritical: true,
+        link: `/tournaments/${tournamentId}`,
+      });
+    }
+    entries = entries.filter((e) => e.paymentStatus !== 'pendingAuthorization');
+  }
 
   // Under the floor → void everything. Nobody is charged (§4).
   if (entries.length < t.minEntries) {
@@ -395,18 +500,67 @@ export async function runClose(tournamentId: string) {
     return;
   }
 
-  const isPaid = t.entryFeeCents > 0;
   const { prizeCents, adminCents } = itemizeEntry(t.entryFeeCents, t.adminFeePercent);
 
-  // Capture authorizations and record the ledger rows.
+  // Collect the money — capture holds, charge saved methods. Per-entry
+  // isolation: one declined card drops THAT entry, never jams the event.
   if (isPaid && stripeEnabled()) {
+    const paidOk: typeof entries = [];
     for (const e of entries) {
-      if (e.paymentIntentId && e.paymentStatus === 'authorized') {
-        await captureIntent(e.paymentIntentId);
+      try {
+        let stripeRef = '';
+        if (e.paymentStatus === 'authorized' && e.paymentIntentId) {
+          await captureIntent(e.paymentIntentId);
+          stripeRef = e.paymentIntentId;
+        } else if (e.paymentStatus === 'methodSaved' && e.paymentMethodId) {
+          const user = (await db.doc(`users/${e.captainId}`).get()).data() as { stripeCustomerId?: string | null } | undefined;
+          const pi = await chargeSavedMethod({
+            amountCents: t.entryFeeCents,
+            customerId: user?.stripeCustomerId as string,
+            paymentMethodId: e.paymentMethodId,
+            tournamentId,
+            entryId: e.id,
+          });
+          stripeRef = pi.id;
+          await db.doc(`entries/${e.id}`).update({ paymentIntentId: pi.id });
+        } else if (e.paymentStatus === 'captured') {
+          paidOk.push(e); // already collected (retry-safe)
+          continue;
+        } else {
+          continue;
+        }
         await db.doc(`entries/${e.id}`).update({ paymentStatus: 'captured' });
-        await writeLedger({ type: 'entryFee', amountCents: prizeCents, fromUserId: e.captainId, toUserId: null, tournamentId, matchId: null, stripeRef: e.paymentIntentId, note: 'entry → prize fund' });
-        await writeLedger({ type: 'adminFee', amountCents: adminCents, fromUserId: e.captainId, toUserId: null, tournamentId, matchId: null, stripeRef: e.paymentIntentId, note: 'entry → administration' });
+        await writeLedger({ type: 'entryFee', amountCents: prizeCents, fromUserId: e.captainId, toUserId: null, tournamentId, matchId: null, stripeRef, note: 'entry → prize fund' });
+        await writeLedger({ type: 'adminFee', amountCents: adminCents, fromUserId: e.captainId, toUserId: null, tournamentId, matchId: null, stripeRef, note: 'entry → administration' });
+        paidOk.push(e);
+      } catch (err) {
+        await db.doc(`entries/${e.id}`).update({ status: 'withdrawn', paymentStatus: 'captureFailed' });
+        await tRef.update({ entryIds: FieldValue.arrayRemove(e.id) });
+        await notify({
+          userId: e.captainId,
+          title: `${t.name}: card declined`,
+          body: 'Your entry fee could not be collected, so your spot was released. Update your card and re-enter if registration reopens.',
+          deadlineCritical: true,
+          link: `/tournaments/${tournamentId}`,
+        });
+        console.error(`capture failed for entry ${e.id}: ${(err as Error).message}`);
       }
+    }
+    entries = paidOk;
+
+    // Declines dropped the field under the floor → refund everyone who WAS
+    // charged and cancel. Nobody pays for an event that didn't run.
+    if (entries.length < t.minEntries) {
+      for (const e of entries) {
+        const piId = e.paymentIntentId as string | null;
+        if (piId) {
+          try { await refundIntent(piId); } catch (err) { console.error(`refund failed for ${e.id}: ${(err as Error).message}`); }
+        }
+        await db.doc(`entries/${e.id}`).update({ paymentStatus: 'refunded' });
+        await notify({ userId: e.captainId, title: `${t.name} cancelled`, body: 'Too many payment failures left the field short. Your entry fee was refunded in full.', deadlineCritical: true });
+      }
+      await tRef.update({ status: 'cancelled' });
+      return;
     }
   }
 
@@ -463,7 +617,10 @@ async function voidAllAuthorizations(tournamentId: string) {
   const entries = await db.collection('entries').where('tournamentId', '==', tournamentId).get();
   for (const d of entries.docs) {
     const e = d.data() as { paymentIntentId: string | null; paymentStatus: string };
-    if (e.paymentIntentId && e.paymentStatus === 'authorized') {
+    if (
+      e.paymentIntentId &&
+      (e.paymentStatus === 'authorized' || e.paymentStatus === 'pendingAuthorization')
+    ) {
       try {
         await voidIntent(e.paymentIntentId);
       } catch (err) {

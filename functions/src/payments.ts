@@ -6,7 +6,13 @@
  */
 import { onCall } from 'firebase-functions/v2/https';
 import { db, requireAuth, requireActive } from './shared';
-import { connectOnboardingLink, ensureCustomer, createSetupIntent as stripeSetupIntent } from './lib/stripe';
+import {
+  accountPayoutsEnabled,
+  connectOnboardingLink,
+  ensureCustomer,
+  createSetupIntent as stripeSetupIntent,
+  stripeEnabled,
+} from './lib/stripe';
 
 const RETURN_URL = process.env.APP_URL ? `${process.env.APP_URL}/payouts` : 'https://thedraw.app/payouts';
 
@@ -22,6 +28,24 @@ export const createConnectOnboardingLink = onCall<Record<string, never>>(async (
     await db.doc(`users/${uid}`).update({ stripeConnectId: connectId });
   }
   return { url };
+});
+
+/**
+ * The truth about payout readiness. A stored stripeConnectId only means an
+ * onboarding LINK was created — the user may have abandoned Stripe's form.
+ * This asks Stripe whether payouts are actually enabled, and caches the
+ * positive answer on the user doc (connectOnboarded) for the UI.
+ */
+export const checkPayoutStatus = onCall<Record<string, never>>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const user = await requireActive(uid);
+  if (!stripeEnabled() || !user.stripeConnectId) return { onboarded: false };
+  const onboarded = await accountPayoutsEnabled(user.stripeConnectId);
+  const cached = (user as { connectOnboarded?: boolean }).connectOnboarded ?? false;
+  if (onboarded !== cached) {
+    await db.doc(`users/${uid}`).update({ connectOnboarded: onboarded });
+  }
+  return { onboarded };
 });
 
 export const createSetupIntent = onCall<Record<string, never>>(async (req) => {

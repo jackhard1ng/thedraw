@@ -29,6 +29,7 @@ export {
   publishTournament,
   cancelTournament,
   enterTournament,
+  confirmEntryPayment,
   withdrawEntry,
   closeRegistration,
 } from './tournaments';
@@ -68,6 +69,6 @@ export { onChatMessage } from './chatnotify';
 
 export { enterDraw, leaveDraw } from './draw';
 
-export { createConnectOnboardingLink, createSetupIntent } from './payments';
+export { createConnectOnboardingLink, createSetupIntent, checkPayoutStatus } from './payments';
 
 export { tick } from './scheduled';

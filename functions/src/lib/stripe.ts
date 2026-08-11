@@ -76,11 +76,52 @@ export async function authorizeEntryFee(args: {
     currency: 'usd',
     customer: args.customerId,
     payment_method: args.paymentMethodId,
+    payment_method_types: ['card'],
     capture_method: 'manual',
     confirm: !!args.paymentMethodId, // one-tap re-entry with a saved card
     off_session: !!args.paymentMethodId,
     metadata: { tournamentId: args.tournamentId, entryId: args.entryId },
   });
+}
+
+/**
+ * Card auth holds expire after ~7 days, so events with long registration
+ * windows save the payment method at entry instead and charge it here, at
+ * close — immediate capture, off-session. Same player promise either way:
+ * charged only if the event runs.
+ */
+export async function chargeSavedMethod(args: {
+  amountCents: number;
+  customerId: string;
+  paymentMethodId: string;
+  tournamentId: string;
+  entryId: string;
+}) {
+  const stripe = getStripe();
+  return stripe.paymentIntents.create({
+    amount: args.amountCents,
+    currency: 'usd',
+    customer: args.customerId,
+    payment_method: args.paymentMethodId,
+    payment_method_types: ['card'],
+    confirm: true,
+    off_session: true,
+    metadata: { tournamentId: args.tournamentId, entryId: args.entryId },
+  });
+}
+
+export async function retrievePaymentIntent(id: string) {
+  return getStripe().paymentIntents.retrieve(id);
+}
+
+export async function retrieveSetupIntent(id: string) {
+  return getStripe().setupIntents.retrieve(id);
+}
+
+/** The truth about Connect onboarding — not "a link was clicked once". */
+export async function accountPayoutsEnabled(connectId: string): Promise<boolean> {
+  const acct = await getStripe().accounts.retrieve(connectId);
+  return acct.payouts_enabled === true;
 }
 
 export async function captureIntent(paymentIntentId: string) {
@@ -138,5 +179,9 @@ export async function connectOnboardingLink(args: {
 
 /** SetupIntent for a saved card — powers one-tap re-entry (§ payouts). */
 export async function createSetupIntent(customerId: string) {
-  return getStripe().setupIntents.create({ customer: customerId });
+  return getStripe().setupIntents.create({
+    customer: customerId,
+    payment_method_types: ['card'],
+    usage: 'off_session',
+  });
 }
