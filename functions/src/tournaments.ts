@@ -270,6 +270,7 @@ export const enterTournament = onCall(async (req) => {
     {
       displayName: user.displayName,
       age: user.age,
+      isAdult: (user as { isAdult?: boolean }).isAdult,
       status: user.status,
       handicap: {
         index: user.handicap.index,

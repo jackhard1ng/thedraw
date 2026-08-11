@@ -34,7 +34,7 @@ const call = (fn, uid, data) => fn.run({ auth: { uid, token: {} }, data, rawRequ
 
 async function makeUser(uid, name, index, opts = {}) {
   await db.doc(`users/${uid}`).set({
-    marketId: 'kc', displayName: name, photoUrl: null, age: 30, gender: 'other',
+    marketId: 'kc', displayName: name, photoUrl: null, isAdult: true, gender: 'other',
     phone: `+1816555${uid.slice(-4).padStart(4, '0')}`,
     handicap: { index, source: 'ghin', ghinNumber: '123', sourceUrl: null,
       verifiedAt: Timestamp.now(), verifiedBy: 'org1' },
@@ -594,7 +594,7 @@ async function main() {
   });
   // A brand-new, self-declared crew member (0 events, account made just now).
   await db.doc('users/crew1').set({
-    marketId: 'kc', displayName: 'Fresh, Guy', photoUrl: null, age: 30, gender: 'other',
+    marketId: 'kc', displayName: 'Fresh, Guy', photoUrl: null, isAdult: true, gender: 'other',
     handicap: { index: 21.0, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
     role: 'member', organizerMarkets: [], canCreatePaidEvents: false,
     createdAt: Timestamp.now(), status: 'active', areas: [],
@@ -636,7 +636,7 @@ async function main() {
   check('organizer cannot self-verify', selfVerify);
   // Cannot stamp GHIN without a GHIN number on file.
   await db.doc('users/nognhin').set({
-    marketId: 'kc', displayName: 'No Ghin', photoUrl: null, age: 30, gender: 'other',
+    marketId: 'kc', displayName: 'No Ghin', photoUrl: null, isAdult: true, gender: 'other',
     handicap: { index: 14, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
     role: 'member', organizerMarkets: [], canCreatePaidEvents: false, createdAt: Timestamp.now(), status: 'active', areas: [],
   });
@@ -646,7 +646,7 @@ async function main() {
   check('cannot stamp GHIN-verified without a GHIN number', ghinBlocked);
   // Tour Index overrides the self-declared index for strokes at entry.
   await db.doc('users/sandbag').set({
-    marketId: 'kc', displayName: 'Sand Bagger', photoUrl: null, age: 30, gender: 'other',
+    marketId: 'kc', displayName: 'Sand Bagger', photoUrl: null, isAdult: true, gender: 'other',
     handicap: { index: 14, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
     role: 'member', organizerMarkets: [], canCreatePaidEvents: false, createdAt: Timestamp.fromMillis(Date.now() - 60 * 86400000),
     status: 'active', areas: [], tourIndex: 6, // committee correction downward

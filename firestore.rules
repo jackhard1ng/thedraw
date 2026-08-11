@@ -56,9 +56,9 @@ service cloud.firestore {
       match /private/{docId} {
         allow read: if isSelf(userId);
         allow create: if isSelf(userId)
-          && request.resource.data.keys().hasOnly(['phone', 'fcmTokens']);
+          && request.resource.data.keys().hasOnly(['phone', 'fcmTokens', 'age']);
         allow update: if isSelf(userId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'fcmTokens']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'fcmTokens', 'age']);
         allow delete: if false;
       }
       allow create: if isSelf(userId)

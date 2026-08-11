@@ -28,7 +28,8 @@ export interface EligibilityResult {
 // Identity only — index verification is the separate requiresVerifiedIndex
 // gate, so open gross events can welcome players with no handicap record.
 function profileComplete(user: User): boolean {
-  return !!user.displayName && user.age >= 18;
+  const adult = user.isAdult ?? (typeof user.age === 'number' && user.age >= 18);
+  return !!user.displayName && adult;
 }
 
 function indexInRange(handicap: Handicap, range: [number, number] | null): boolean {

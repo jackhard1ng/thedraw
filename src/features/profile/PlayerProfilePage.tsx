@@ -11,6 +11,8 @@ import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/fir
 import { db } from '@/lib/firebase';
 import { Badge, Card, Num, SectionHeader, Spinner } from '@/components/ui';
 import { FollowButton } from '@/features/spectating/FollowButton';
+import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
+import { useAuth } from '@/context/AuthContext';
 import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { formatTeeTime } from '@/lib/format';
 import { formatCents } from '@/lib/money';
@@ -103,6 +105,7 @@ function Record({ userId }: { userId: string }) {
 export function PlayerProfilePage() {
   const { uid } = useParams();
   const nav = useNavigate();
+  const { fbUser } = useAuth();
   const [user, setUser] = useState<User | null | undefined>(undefined);
 
   useEffect(() => {
@@ -145,7 +148,17 @@ export function PlayerProfilePage() {
           <p className="text-sm text-ink-faint">{user.marketId.toUpperCase()}</p>
         </div>
         {/* Follow = "tell me when they play again" — alerts on their posts. */}
-        <FollowButton targetId={uid} />
+        <div className="flex shrink-0 items-center gap-2">
+          <FollowButton targetId={uid} />
+          {fbUser && fbUser.uid !== uid && (
+            <ReportBlockMenu
+              targetType="user"
+              targetId={uid}
+              subjectUserId={uid}
+              subjectName={user.displayName}
+            />
+          )}
+        </div>
       </div>
 
       <Card className="mt-6 p-4">

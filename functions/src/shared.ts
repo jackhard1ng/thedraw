@@ -19,7 +19,8 @@ export function requireAuth(auth: { uid: string } | undefined): string {
 export interface UserDoc {
   marketId: string;
   displayName: string;
-  age: number;
+  age?: number; // legacy docs only — exact age now lives in private/data
+  isAdult?: boolean;
   role: 'member' | 'organizer' | 'admin';
   organizerMarkets: string[];
   canCreatePaidEvents: boolean;
@@ -49,6 +50,7 @@ export async function getUser(uid: string): Promise<UserDoc> {
  */
 export interface PrivateData {
   phone: string;
+  age: number | null;
   fcmTokens: string[];
   stripeCustomerId: string | null;
   stripeConnectId: string | null;
@@ -61,9 +63,10 @@ export async function getPrivate(uid: string): Promise<PrivateData> {
     db.doc(`users/${uid}`).get(),
   ]);
   const p = (priv.data() ?? {}) as Partial<PrivateData>;
-  const u = (user.data() ?? {}) as Partial<PrivateData>;
+  const u = (user.data() ?? {}) as Partial<PrivateData> & { age?: number };
   return {
     phone: p.phone ?? u.phone ?? '',
+    age: p.age ?? u.age ?? null,
     fcmTokens: p.fcmTokens ?? u.fcmTokens ?? [],
     stripeCustomerId: p.stripeCustomerId ?? u.stripeCustomerId ?? null,
     stripeConnectId: p.stripeConnectId ?? u.stripeConnectId ?? null,

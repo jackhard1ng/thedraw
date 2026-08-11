@@ -193,6 +193,36 @@ function ConfirmTeeTime({ postId, hasCourse }: { postId: string; hasCourse: bool
   );
 }
 
+/** The group's members as tappable player cards — vetting before you commit. */
+function Roster({ userIds, meId }: { userIds: string[]; meId: string | undefined }) {
+  const [people, setPeople] = useState<Record<string, { name: string; index: number | null }>>({});
+  useEffect(() => {
+    userIds.forEach(async (u) => {
+      try {
+        const snap = await getDoc(doc(db, 'users', u));
+        const d = snap.data() as { displayName?: string; handicap?: { index: number } } | undefined;
+        setPeople((p) => ({ ...p, [u]: { name: d?.displayName ?? 'Player', index: d?.handicap?.index ?? null } }));
+      } catch {
+        setPeople((p) => ({ ...p, [u]: { name: 'Player', index: null } }));
+      }
+    });
+  }, [userIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="divide-y divide-rule">
+      {userIds.map((u) => (
+        <Link key={u} to={`/players/${u}`} className="flex items-center justify-between py-2 text-sm">
+          <span className="text-ink">
+            {u === meId ? 'You' : people[u]?.name ?? '…'}
+          </span>
+          {people[u]?.index != null && (
+            <Num className="text-ink-faint">{formatIndex(people[u].index!)}</Num>
+          )}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export function PostDetailPage() {
   const { postId } = useParams();
   const { fbUser } = useAuth();
@@ -334,6 +364,17 @@ export function PostDetailPage() {
             <ConfirmTeeTime postId={post.id} hasCourse={!!post.course.placeId} />
           )}
       </Card>
+
+      {/* Who's in — so a shy or cautious player can VET the group before
+          committing (and reach each person's profile / report menu). */}
+      {post.joinedUserIds.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1 font-display uppercase tracking-wide text-xs text-ink-soft">
+            In this group
+          </p>
+          <Roster userIds={[post.createdBy, ...post.joinedUserIds]} meId={uid} />
+        </div>
+      )}
 
       {post.status === 'completed' && (
         <div className="mt-6 space-y-4">

@@ -58,8 +58,9 @@ export function Onboarding() {
         marketId: DEFAULT_MARKET_ID,
         displayName: displayName.trim(),
         photoUrl: fbUser.photoURL ?? null,
-        age: ageNum,
-        gender,
+        // Only the 18+ FACT is public (the gate needs a boolean); the exact age
+        // goes to the owner-only private subdoc, not readable by other members.
+        isAdult: ageNum >= 18,
         handicap: {
           index: indexNum,
           // A client may only ever self-declare; a green/yellow badge is granted
@@ -80,13 +81,11 @@ export function Onboarding() {
         referralSource: localStorage.getItem('thedraw.src') ?? null,
       });
       const phoneE164 = fbUser.phoneNumber ?? normalizePhone(phone);
-      if (phoneE164) {
-        await setDoc(
-          doc(db, 'users', fbUser.uid, 'private', 'data'),
-          { phone: phoneE164 },
-          { merge: true },
-        );
-      }
+      await setDoc(
+        doc(db, 'users', fbUser.uid, 'private', 'data'),
+        { age: ageNum, ...(phoneE164 ? { phone: phoneE164 } : {}) },
+        { merge: true },
+      );
       // AuthContext's snapshot listener will pick up the new profile.
     } catch (e) {
       setError((e as Error).message);

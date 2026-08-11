@@ -98,6 +98,16 @@ export const submitReport = onCall<{
     status: 'open',
   });
 
+  // Close the loop — the reporter hears that it landed, not just a toast that
+  // vanishes on navigation.
+  const { notify } = await import('./lib/notify');
+  await notify({
+    userId: uid,
+    title: 'Report received',
+    body: 'Thanks — an organizer will review this. You won’t be identified to the person you reported.',
+    link: '/inbox',
+  });
+
   // Report volume is a signal (§5): multiple INDEPENDENT open reports against
   // one target surface to the organizer proactively, not in a queue.
   const open = await db

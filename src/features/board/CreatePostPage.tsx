@@ -270,7 +270,7 @@ export function CreatePostPage() {
                   <option value="justGolf">Just golf</option>
                   <option value="singlesMatch">Singles match</option>
                   <option value="twoVTwo">2v2</option>
-                  <option value="skins">Skins</option>
+                  <option value="skins">Skins (you score it — no app payouts yet)</option>
                 </select>
               </Field>
               <Field label="Handicap">

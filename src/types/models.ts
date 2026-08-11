@@ -54,8 +54,10 @@ export interface User {
   marketId: string;
   displayName: string; // real name, no usernames
   photoUrl: string | null;
-  age: number;
-  gender: 'M' | 'F' | 'other';
+  /** @deprecated exact age moved to users/{uid}/private/data — legacy docs only. */
+  age?: number;
+  isAdult?: boolean;
+  gender?: 'M' | 'F' | 'other';
   /** @deprecated PII moved to users/{uid}/private/data — present on legacy docs only. */
   phone?: string;
   handicap: Handicap;

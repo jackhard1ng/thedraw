@@ -20,7 +20,8 @@ export interface EligibilityRules {
 
 export interface EligUser {
   displayName: string;
-  age: number;
+  age?: number; // legacy docs only — new docs use isAdult
+  isAdult?: boolean;
   status: 'active' | 'restricted' | 'banned';
   handicap: {
     index: number;
@@ -61,7 +62,9 @@ export function checkEligibility(
   // Complete profile = identity only (real name, 18+). Index verification is a
   // SEPARATE gate (requiresVerifiedIndex) so open gross events — where the
   // index decides nothing — can welcome players with no handicap record.
-  const profileComplete = !!user.displayName && user.age >= 18;
+  // 18+ is the isAdult flag on new docs; legacy docs still carry exact age.
+  const adult = user.isAdult ?? (typeof user.age === 'number' && user.age >= 18);
+  const profileComplete = !!user.displayName && adult;
   if (rules.requiresCompleteProfile && !profileComplete) {
     reasons.push('Complete your profile (real name, age 18+).');
   }

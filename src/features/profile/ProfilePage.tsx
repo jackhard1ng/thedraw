@@ -482,9 +482,7 @@ export function ProfilePage() {
         )}
         <div>
           <h1 className="text-2xl">{profile.displayName}</h1>
-          <p className="text-sm text-ink-faint">
-            {profile.age} · {profile.marketId.toUpperCase()}
-          </p>
+          <p className="text-sm text-ink-faint">{profile.marketId.toUpperCase()}</p>
           {/* The Player ID a partner needs for team entry when search misses. */}
           <button
             className="mt-0.5 text-xs text-ink-faint underline underline-offset-2 hover:text-tournament"
