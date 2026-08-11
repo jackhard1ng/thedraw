@@ -7,7 +7,7 @@
  *
  * Empty bracket slots are the empty string until a winner advances into them.
  */
-import { db, FieldValue, Timestamp } from '../shared';
+import { addThreadMembers, db, FieldValue, Timestamp } from '../shared';
 import { firstRoundPairings, advancementTarget, nextPowerOfTwo, totalRounds } from '../engine/bracket';
 import { podPairings } from '../engine/pods';
 import { notify } from './notify';
@@ -78,17 +78,30 @@ function blankMatch(id: string, tid: string, round: number, entryIds: [string, s
   };
 }
 
+/** Everyone on either entry becomes a member of the match's chat thread. */
+async function syncMatchThread(matchId: string, entryIds: [string, string]) {
+  const uids: string[] = [];
+  for (const eid of entryIds) {
+    if (!eid) continue;
+    const e = (await db.doc(`entries/${eid}`).get()).data() as { userIds?: string[] } | undefined;
+    uids.push(...(e?.userIds ?? []));
+  }
+  await addThreadMembers(matchId, uids);
+}
+
 /** Generate a single-elimination bracket. Byes auto-advance to round 2. */
 export async function createBracketMatches(tid: string, entriesBySeed: string[]) {
   const pairings = firstRoundPairings(entriesBySeed);
   const batch = db.batch();
   const byeAdvances: { round: number; index: number; slot: number; entryId: string }[] = [];
+  const threadSyncs: { id: string; entryIds: [string, string] }[] = [];
 
   for (const p of pairings) {
     const bothReal = p.entryA && p.entryB;
     if (bothReal) {
       const id = `${tid}_r1_m${p.index}`;
       batch.set(db.doc(`matches/${id}`), blankMatch(id, tid, 1, [p.entryA!, p.entryB!]));
+      threadSyncs.push({ id, entryIds: [p.entryA!, p.entryB!] });
     } else {
       // exactly one real entry (the top seed of the pair) gets a bye to round 2
       const winner = (p.entryA ?? p.entryB)!;
@@ -97,6 +110,7 @@ export async function createBracketMatches(tid: string, entriesBySeed: string[])
     }
   }
   await batch.commit();
+  for (const s of threadSyncs) await syncMatchThread(s.id, s.entryIds);
 
   // Place byes into round 2 (creating those matches as needed).
   for (const b of byeAdvances) {
@@ -109,15 +123,18 @@ export async function createBracketMatches(tid: string, entriesBySeed: string[])
 /** Round-robin pods (each pod is independent). */
 export async function createPodMatches(tid: string, pods: string[][]) {
   const batch = db.batch();
+  const threadSyncs: { id: string; entryIds: [string, string] }[] = [];
   pods.forEach((pod, podIndex) => {
     for (const pair of podPairings(pod, podIndex)) {
       const id = `${tid}_p${podIndex}_m${pair.index}`;
       const m = blankMatch(id, tid, 1, [pair.entryA, pair.entryB]);
       m.podIndex = podIndex;
       batch.set(db.doc(`matches/${id}`), m);
+      threadSyncs.push({ id, entryIds: [pair.entryA, pair.entryB] });
     }
   });
   await batch.commit();
+  for (const s of threadSyncs) await syncMatchThread(s.id, s.entryIds);
 }
 
 /**
@@ -215,6 +232,8 @@ async function placeIntoSlot(tid: string, round: number, index: number, slot: nu
       'scheduling.deadline': bothPresent ? Timestamp.fromMillis(Date.now() + 2 * 86_400_000) : null,
     });
   });
+
+  await syncMatchThread(id, [entryId, ''] as [string, string]);
 
   // A newly-formed pairing quietly starts a 48h forfeit clock — winning round 1
   // must never be how you lose round 2. Tell both sides the moment the

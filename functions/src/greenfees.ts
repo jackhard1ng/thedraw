@@ -25,7 +25,7 @@
  *   <24h   — no refund, match forfeited
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { db, Timestamp, requireAuth, requireActive, getUser, writeLedger, writeReputation } from './shared';
+import { db, Timestamp, requireAuth, requireActive, getUser, getPrivate, writeLedger, writeReputation } from './shared';
 import { getStripe, stripeEnabled } from './lib/stripe';
 import { forfeitMatch } from './matches';
 import { notify } from './lib/notify';
@@ -74,41 +74,63 @@ export const collectGreenFees = onCall<{
   }
 
   const stripe = getStripe();
-  const booker = await getUser(uid);
-  const charged: string[] = [];
+  const bookerPriv = await getPrivate(uid);
+  // Idempotent across retries: players already charged in a previous partial
+  // run (recorded on the match as we go) are skipped, never double-charged.
+  const alreadyCharged = new Set<string>((m.greenFees?.chargedUserIds as string[] | undefined) ?? []);
+  const charged: string[] = [...alreadyCharged];
   for (const player of players) {
+    if (alreadyCharged.has(player)) continue;
     const p = await getUser(player);
-    if (!p.stripeCustomerId) {
+    const pPriv = await getPrivate(player);
+    if (!pPriv.stripeCustomerId) {
       throw new HttpsError('failed-precondition', `${p.displayName} has no saved payment method.`);
     }
-    const methods = await stripe.paymentMethods.list({ customer: p.stripeCustomerId, type: 'card', limit: 1 });
+    const methods = await stripe.paymentMethods.list({ customer: pPriv.stripeCustomerId, type: 'card', limit: 1 });
     if (!methods.data[0]) throw new HttpsError('failed-precondition', `${p.displayName} has no saved card.`);
-    const pi = await stripe.paymentIntents.create({
-      amount: perPlayerCents,
-      currency: 'usd',
-      customer: p.stripeCustomerId,
-      payment_method: methods.data[0].id,
-      confirm: true,
-      off_session: true,
-      metadata: { matchId, kind: 'greenFee' },
-    });
+    let pi;
+    try {
+      pi = await stripe.paymentIntents.create({
+        amount: perPlayerCents,
+        currency: 'usd',
+        customer: pPriv.stripeCustomerId,
+        payment_method: methods.data[0].id,
+        confirm: true,
+        off_session: true,
+        metadata: { matchId, kind: 'greenFee' },
+      });
+    } catch (err) {
+      throw new HttpsError(
+        'failed-precondition',
+        `${p.displayName}'s card was declined. Everyone charged so far is recorded — fix it up and retry; nobody is charged twice.`,
+      );
+    }
     charged.push(player);
+    // Record progress IMMEDIATELY so a later failure can't cause re-charging.
+    await mRef.update({ 'greenFees.chargedUserIds': charged, 'greenFees.perPlayerCents': perPlayerCents });
     await writeLedger({ type: 'greenFee', amountCents: perPlayerCents, fromUserId: player, toUserId: null, tournamentId: m.tournamentId ?? null, matchId, stripeRef: pi.id, note: 'green fee share' });
+    // A card charge with no message is a support ticket — tell the player.
+    await notify({
+      userId: player,
+      title: `Green fee: $${(perPlayerCents / 100).toFixed(2)}`,
+      body: 'Your share of the prepaid tee time was charged to your saved card and reimbursed to the booker.',
+      link: `/matches/${matchId}`,
+    });
   }
 
   // Reimburse the booker from collected funds — never player-to-player debt.
   const totalCents = perPlayerCents * charged.length;
   let reimburseRef = 'pending-onboarding';
-  if (booker.stripeConnectId) {
+  if (bookerPriv.stripeConnectId) {
     const tr = await stripe.transfers.create({
       amount: totalCents,
       currency: 'usd',
-      destination: booker.stripeConnectId,
+      destination: bookerPriv.stripeConnectId,
       metadata: { matchId, kind: 'greenFeeReimbursement' },
     });
     reimburseRef = tr.id;
   } else {
-    await notify({ userId: uid, title: 'Set up payouts to be reimbursed', body: 'Green fees were collected — add your payout account to receive them.', deadlineCritical: true, link: '/payouts' });
+    await notify({ userId: uid, title: 'Set up payouts to be reimbursed', body: 'Green fees were collected — add your payout account to receive them. The reimbursement retries automatically once you finish.', deadlineCritical: true, link: '/payouts' });
   }
   await writeLedger({ type: 'greenFeeReimbursement', amountCents: totalCents, fromUserId: null, toUserId: uid, tournamentId: m.tournamentId ?? null, matchId, stripeRef: reimburseRef, note: `green fees × ${charged.length}` });
 

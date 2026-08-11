@@ -41,9 +41,26 @@ service cloud.firestore {
 
     // ---- users: a user may create and edit ONLY their own document ----
     // Sensitive, function-owned fields are frozen against client writes even
-    // on one's own doc (role, flags, verification, stripe ids, status).
+    // on one's own doc (role, flags, verification, status).
+    //
+    // PRIVACY: the users doc is readable by any signed-in member (names,
+    // handicaps and reliability are the trust product) — so PII must not live
+    // on it. Phone numbers, push tokens, and Stripe ids live in the private
+    // subdocument below, readable by the owner only.
     match /users/{userId} {
       allow read: if isSignedIn();
+
+      // users/{uid}/private/data — contact + billing. The owner may read it,
+      // and may write ONLY contact fields (phone, fcmTokens); Stripe ids and
+      // onboarding state are written by Cloud Functions alone.
+      match /private/{docId} {
+        allow read: if isSelf(userId);
+        allow create: if isSelf(userId)
+          && request.resource.data.keys().hasOnly(['phone', 'fcmTokens']);
+        allow update: if isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'fcmTokens']);
+        allow delete: if false;
+      }
       allow create: if isSelf(userId)
         && request.resource.data.role == 'member'
         && request.resource.data.status == 'active'
@@ -94,10 +111,23 @@ service cloud.firestore {
       allow delete: if false; // cancel by setting status, never hard-delete
     }
 
-    // ---- chat: message per post/match thread; author writes their own line ----
+    // ---- chat: message per post/match/tournament thread ----
+    // Membership is REAL here, not cosmetic: threads/{threadId}.memberIds is
+    // maintained by Cloud Functions (join/leave, draw grouping, match
+    // creation, tournament entry), and only members can read or write a
+    // thread. Two players coordinating a match are not a public broadcast.
+    function isThreadMember(threadId) {
+      return isSignedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.memberIds;
+    }
+    match /threads/{threadId} {
+      allow read: if isThreadMember(threadId);
+      allow write: if false; // membership is function-maintained
+    }
     match /threads/{threadId}/messages/{messageId} {
-      allow read: if isActive();
+      allow read: if isThreadMember(threadId);
       allow create: if isActive()
+        && isThreadMember(threadId)
         && request.resource.data.authorId == request.auth.uid
         && request.resource.data.text is string
         && request.resource.data.text.size() <= 2000;

@@ -6,7 +6,7 @@
  *
  * Brackets become immutable on completion; the trophy links to the frozen draw.
  */
-import { db, FieldValue, Timestamp, writeLedger } from './shared';
+import { db, FieldValue, Timestamp, getPrivate, writeLedger } from './shared';
 import { computePayouts, type PayoutRow, type Standings } from './engine/payout';
 import { itemizeEntry } from './engine/money';
 import { payout as stripePayout, stripeEnabled } from './lib/stripe';
@@ -160,13 +160,11 @@ export async function maybeCompleteTournament(tournamentId: string) {
       const orgBase = Math.max(0, adminTotal - processingCents);
       const orgCut = Math.round((orgBase * market.organizerSharePercent!) / 100);
       if (orgCut > 0) {
-        const orgUser = (await db.doc(`users/${market.marketOrganizerId}`).get()).data() as
-          | { stripeConnectId: string | null }
-          | undefined;
+        const orgPriv = await getPrivate(market.marketOrganizerId);
         let stripeRef = 'pending-onboarding';
-        if (stripeEnabled() && orgUser?.stripeConnectId) {
+        if (stripeEnabled() && orgPriv.stripeConnectId) {
           try {
-            const tr = await stripePayout({ amountCents: orgCut, destinationConnectId: orgUser.stripeConnectId, tournamentId, toUserId: market.marketOrganizerId });
+            const tr = await stripePayout({ amountCents: orgCut, destinationConnectId: orgPriv.stripeConnectId, tournamentId, toUserId: market.marketOrganizerId });
             stripeRef = tr.id;
           } catch (err) {
             console.error(`organizer share failed: ${(err as Error).message}`);
@@ -184,11 +182,11 @@ export async function maybeCompleteTournament(tournamentId: string) {
         const share = memberShare.get(`${a.entryId}:${member}`) ?? 0;
         if (share <= 0) continue;
         const dollars = `$${(share / 100).toFixed(2)}`;
-        const user = (await db.doc(`users/${member}`).get()).data() as { stripeConnectId: string | null } | undefined;
+        const memberPriv = await getPrivate(member);
         let stripeRef = 'pending-onboarding';
-        if (stripeEnabled() && user?.stripeConnectId) {
+        if (stripeEnabled() && memberPriv.stripeConnectId) {
           try {
-            const tr = await stripePayout({ amountCents: share, destinationConnectId: user.stripeConnectId, tournamentId, toUserId: member });
+            const tr = await stripePayout({ amountCents: share, destinationConnectId: memberPriv.stripeConnectId, tournamentId, toUserId: member });
             stripeRef = tr.id;
             await notify({
               userId: member,

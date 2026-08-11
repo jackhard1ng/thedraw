@@ -20,13 +20,10 @@ export interface UserDoc {
   marketId: string;
   displayName: string;
   age: number;
-  phone: string;
   role: 'member' | 'organizer' | 'admin';
   organizerMarkets: string[];
   canCreatePaidEvents: boolean;
   status: 'active' | 'restricted' | 'banned';
-  stripeCustomerId: string | null;
-  stripeConnectId: string | null;
   createdAt: Timestamp;
   handicap: {
     index: number;
@@ -39,6 +36,60 @@ export async function getUser(uid: string): Promise<UserDoc> {
   const snap = await db.doc(`users/${uid}`).get();
   if (!snap.exists) throw new HttpsError('failed-precondition', 'Finish onboarding first.');
   return snap.data() as UserDoc;
+}
+
+/**
+ * PII + billing live in users/{uid}/private/data (rules: owner-readable,
+ * owner may write contact fields only) — the public users doc is readable by
+ * every signed-in member, so phone numbers and Stripe ids must not sit on it.
+ * Reads fall back to the legacy users-doc fields so accounts created before
+ * the privacy split keep working.
+ */
+export interface PrivateData {
+  phone: string;
+  fcmTokens: string[];
+  stripeCustomerId: string | null;
+  stripeConnectId: string | null;
+  connectOnboarded: boolean;
+}
+
+export async function getPrivate(uid: string): Promise<PrivateData> {
+  const [priv, user] = await Promise.all([
+    db.doc(`users/${uid}/private/data`).get(),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  const p = (priv.data() ?? {}) as Partial<PrivateData>;
+  const u = (user.data() ?? {}) as Partial<PrivateData>;
+  return {
+    phone: p.phone ?? u.phone ?? '',
+    fcmTokens: p.fcmTokens ?? u.fcmTokens ?? [],
+    stripeCustomerId: p.stripeCustomerId ?? u.stripeCustomerId ?? null,
+    stripeConnectId: p.stripeConnectId ?? u.stripeConnectId ?? null,
+    connectOnboarded: p.connectOnboarded ?? u.connectOnboarded ?? false,
+  };
+}
+
+export async function setPrivate(uid: string, patch: Partial<PrivateData>) {
+  await db.doc(`users/${uid}/private/data`).set(patch, { merge: true });
+}
+
+/**
+ * Chat privacy: threads/{threadId}.memberIds is what firestore.rules checks
+ * before letting anyone read or post in a thread. Functions maintain it at
+ * every membership change — a thread with no doc is readable by no one.
+ */
+export async function addThreadMembers(threadId: string, uids: string[]) {
+  if (uids.length === 0) return;
+  await db
+    .doc(`threads/${threadId}`)
+    .set({ memberIds: FieldValue.arrayUnion(...uids) }, { merge: true });
+}
+
+export async function removeThreadMembers(threadId: string, uids: string[]) {
+  if (uids.length === 0) return;
+  await db
+    .doc(`threads/${threadId}`)
+    .set({ memberIds: FieldValue.arrayRemove(...uids) }, { merge: true });
 }
 
 export async function requireActive(uid: string): Promise<UserDoc> {

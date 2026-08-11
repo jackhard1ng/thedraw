@@ -28,7 +28,7 @@ import type {
 } from '@/types/models';
 
 export function CreatePostPage() {
-  const { fbUser } = useAuth();
+  const { fbUser, profile } = useAuth();
   const nav = useNavigate();
 
   // The two required fields.
@@ -76,6 +76,10 @@ export function CreatePostPage() {
       await addDoc(collection(db, 'roundPosts'), {
         marketId: DEFAULT_MARKET_ID,
         createdBy: fbUser.uid,
+        // Denormalized so every card shows WHO you'd be joining (the trust
+        // story) without a users-collection read per row.
+        creatorName: profile?.displayName ?? null,
+        creatorIndex: profile?.handicap.index ?? null,
         title: title.trim() || null,
         description: description.trim() || null,
         timing: {

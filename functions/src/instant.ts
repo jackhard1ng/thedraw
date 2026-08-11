@@ -20,7 +20,7 @@
  * handling).
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { db, Timestamp, requireAuth, requireActive } from './shared';
+import { db, Timestamp, requireAuth, requireActive, addThreadMembers } from './shared';
 import { HIGH_STAKES_ELIGIBILITY, DEFAULT_PAID_ELIGIBILITY, FREE_ELIGIBILITY } from './engine/eligibility';
 
 /** Payout shape presets (addendum §3). Keys are the template's allowed list. */
@@ -148,5 +148,7 @@ export const createInstantEvent = onCall<{
     isInstant: true,
   });
 
+  // The creator organizes in the field chat even before anyone enters.
+  await addThreadMembers(ref.id, [uid]);
   return { tournamentId: ref.id };
 });

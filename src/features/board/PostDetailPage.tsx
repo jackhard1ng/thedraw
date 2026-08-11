@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { usePost } from './useRoundPosts';
@@ -35,6 +35,7 @@ function GroupScores({
   inGroup: boolean;
 }) {
   const [rounds, setRounds] = useState<(Round & { id: string })[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const q = query(collection(db, 'rounds'), where('roundPostId', '==', postId));
@@ -42,6 +43,20 @@ function GroupScores({
       setRounds(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Round) }))),
     );
   }, [postId]);
+
+  // Attesting an anonymous number is meaningless — resolve whose score it is.
+  useEffect(() => {
+    const missing = [...new Set(rounds.map((r) => r.userId))].filter((u) => !(u in names));
+    if (missing.length === 0) return;
+    missing.forEach(async (u) => {
+      try {
+        const snap = await getDoc(doc(db, 'users', u));
+        setNames((n) => ({ ...n, [u]: (snap.data() as { displayName?: string } | undefined)?.displayName ?? 'Player' }));
+      } catch {
+        setNames((n) => ({ ...n, [u]: 'Player' }));
+      }
+    });
+  }, [rounds, names]);
 
   const mine = rounds.find((r) => r.userId === uid);
 
@@ -61,6 +76,9 @@ function GroupScores({
         {rounds.map((r) => (
           <div key={r.id} className="flex items-center justify-between py-2 text-sm">
             <span className="text-ink">
+              <Link to={`/players/${r.userId}`} className="mr-2 text-ink underline-offset-2 hover:underline">
+                {r.userId === uid ? 'You' : (names[r.userId] ?? '…')}
+              </Link>
               <Num className="text-lg">{r.totalScore}</Num>
               <span className="ml-2 text-ink-faint">({r.holes} holes)</span>
             </span>
@@ -231,6 +249,20 @@ export function PostDetailPage() {
           <div>
             <h1 className="text-2xl">{post.title || timing}</h1>
             {post.title && <p className="mt-1 text-ink-soft">{timing}</p>}
+            {post.creatorName && (
+              <p className="mt-1 text-sm text-ink-soft">
+                Posted by{' '}
+                <Link
+                  to={`/players/${post.createdBy}`}
+                  className="text-tournament underline underline-offset-2"
+                >
+                  {post.creatorName}
+                </Link>
+                {post.creatorIndex != null && (
+                  <Num className="ml-1 text-ink-faint">({post.creatorIndex.toFixed(1)})</Num>
+                )}
+              </p>
+            )}
           </div>
           {!isOwner && (
             <ReportBlockMenu
@@ -279,6 +311,10 @@ export function PostDetailPage() {
           </div>
           {isOwner ? (
             <Badge tone="neutral">Your post</Badge>
+          ) : !uid ? (
+            <Button variant="primary" onClick={() => nav('/')}>
+              Sign in to join
+            </Button>
           ) : (
             <Button
               variant={isJoined ? 'ghost' : 'primary'}

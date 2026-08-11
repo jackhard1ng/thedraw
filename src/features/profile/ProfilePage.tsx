@@ -30,6 +30,7 @@ import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { areasFor } from '@/lib/areas';
 import { formatTeeTime } from '@/lib/format';
 import { formatCents } from '@/lib/money';
+import { usePrivate } from '@/lib/usePrivate';
 import type { ReputationEvent, Round } from '@/types/models';
 
 const PLACEMENT_LABEL: Record<string, string> = {
@@ -247,10 +248,13 @@ function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts
  * Texts are the deadline-critical channel — a Google-sign-in user has no phone
  * on file, so this row lets them add one (and anyone correct theirs).
  */
-function PhoneRow({ userId, phone }: { userId: string; phone: string }) {
+function PhoneRow({ userId }: { userId: string }) {
+  const contact = usePrivate(userId);
+  const phone = contact?.phone ?? '';
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
+  if (contact === null) return null;
   if (!editing) {
     return (
       <div className="flex items-center justify-between py-2 text-sm">
@@ -287,7 +291,12 @@ function PhoneRow({ userId, phone }: { userId: string; phone: string }) {
             setBusy(true);
             try {
               const { normalizePhone } = await import('@/features/onboarding/Onboarding');
-              await updateDoc(doc(db, 'users', userId), { phone: normalizePhone(value) });
+              const { setDoc: setPrivateDoc } = await import('firebase/firestore');
+              await setPrivateDoc(
+                doc(db, 'users', userId, 'private', 'data'),
+                { phone: normalizePhone(value) },
+                { merge: true },
+              );
               setEditing(false);
             } finally {
               setBusy(false);
@@ -492,7 +501,7 @@ export function ProfilePage() {
       <div className="mt-6">
         <SectionHeader>Alerts</SectionHeader>
         <PushButton />
-        <PhoneRow userId={fbUser.uid} phone={profile.phone} />
+        <PhoneRow userId={fbUser.uid} />
         <AlertPrefs userId={fbUser.uid} prefs={profile.alertPrefs} />
       </div>
 

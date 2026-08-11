@@ -5,7 +5,7 @@
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { getAuth } from 'firebase-admin/auth';
-import { db, FieldValue, requireAuth, requireActive, getUser } from './shared';
+import { db, FieldValue, requireAuth, requireActive, getUser, addThreadMembers, removeThreadMembers } from './shared';
 
 export const joinRound = onCall<{ postId: string }>(async (req) => {
   const uid = requireAuth(req.auth);
@@ -42,8 +42,9 @@ export const joinRound = onCall<{ postId: string }>(async (req) => {
     if (p.joinedUserIds.includes(uid)) return;
     if (p.slotsFilled >= p.slotsTotal) throw new HttpsError('failed-precondition', 'This round is full.');
     if (p.hosting?.hostMustApprove) {
-      tx.update(postRef, { pendingUserIds: FieldValue.arrayUnion(uid) });
-      return;
+      // Host-approval is not built yet — an honest error beats a silent
+      // "pending" state the UI can't show and the host never hears about.
+      throw new HttpsError('failed-precondition', 'This round is host-approved and approvals are not open yet.');
     }
     const slotsFilled = p.slotsFilled + 1;
     tx.update(postRef, {
@@ -52,6 +53,7 @@ export const joinRound = onCall<{ postId: string }>(async (req) => {
       status: slotsFilled >= p.slotsTotal ? 'full' : 'open',
     });
   });
+  await addThreadMembers(postId, [uid]); // chat rules check this membership
   return { status: 'joined' };
 });
 
@@ -71,6 +73,7 @@ export const leaveRound = onCall<{ postId: string }>(async (req) => {
       status: p.status === 'full' ? 'open' : p.status,
     });
   });
+  await removeThreadMembers(postId, [uid]);
   return { status: 'left' };
 });
 
@@ -162,6 +165,7 @@ export const deleteAccount = onCall<Record<string, never>>(async (req) => {
   // Ledger rows are RETAINED (tax/1099) but anonymized in place (§5).
   ledgerFrom.forEach((d) => batch.update(d.ref, { fromUserId: null, note: 'anonymized' }));
   ledgerTo.forEach((d) => batch.update(d.ref, { toUserId: null, note: 'anonymized' }));
+  batch.delete(db.doc(`users/${uid}/private/data`)); // PII goes with the account
   batch.delete(db.doc(`users/${uid}`));
   await batch.commit();
 

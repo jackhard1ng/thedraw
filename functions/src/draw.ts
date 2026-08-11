@@ -200,6 +200,8 @@ async function createDrawGroup(group: Req[], now: number) {
   const postRef = await db.collection('roundPosts').add({
     marketId: group[0].marketId,
     createdBy: booker.userId,
+    creatorName: booker.displayName,
+    creatorIndex: booker.index,
     title: `${dayLabel} draw group`,
     description: `Drawn by The Draw. ${booker.displayName} books and confirms the tee time on this page.`,
     timing: { mode: 'flexible', fixedTime: null, windowStart: null, windowEnd: null, flexibleDays: [group[0].day] },

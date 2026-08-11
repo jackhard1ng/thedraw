@@ -290,5 +290,5 @@ export const createSetupIntent = httpsCallable<
 // not merely whether a link was once created.
 export const checkPayoutStatus = httpsCallable<
   Record<string, never>,
-  { onboarded: boolean }
+  { onboarded: boolean; started: boolean }
 >(functions, 'checkPayoutStatus');

@@ -10,7 +10,7 @@
  * Weather is the #1 expected support request; it is automated before launch.
  */
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { db, Timestamp } from './shared';
+import { db, getPrivate, Timestamp } from './shared';
 import { resolveAtDeadline, type AvailabilityEntry } from './engine/scheduling';
 import { runClose } from './tournaments';
 import { finalizeMatch, forfeitMatch } from './matches';
@@ -50,15 +50,13 @@ async function settlePendingPayouts() {
   for (const d of rows.docs) {
     const row = d.data() as { toUserId: string | null; amountCents: number; tournamentId: string | null };
     if (!row.toUserId) continue;
-    const user = (await db.doc(`users/${row.toUserId}`).get()).data() as
-      | { stripeConnectId: string | null }
-      | undefined;
-    if (!user?.stripeConnectId) continue; // still not onboarded — keep waiting
+    const priv = await getPrivate(row.toUserId);
+    if (!priv.stripeConnectId) continue; // still not onboarded — keep waiting
     try {
-      if (!(await accountPayoutsEnabled(user.stripeConnectId))) continue;
+      if (!(await accountPayoutsEnabled(priv.stripeConnectId))) continue;
       const tr = await stripePayout({
         amountCents: row.amountCents,
-        destinationConnectId: user.stripeConnectId,
+        destinationConnectId: priv.stripeConnectId,
         tournamentId: row.tournamentId ?? '',
         toUserId: row.toUserId,
       });

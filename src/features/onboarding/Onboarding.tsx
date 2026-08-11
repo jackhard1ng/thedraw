@@ -49,13 +49,14 @@ export function Onboarding() {
     setBusy(true);
     setError(null);
     try {
+      // PII (phone) goes to the owner-only private subdoc — the users doc is
+      // readable by every signed-in member and must stay contact-free.
       await setDoc(doc(db, 'users', fbUser.uid), {
         marketId: DEFAULT_MARKET_ID,
         displayName: displayName.trim(),
         photoUrl: fbUser.photoURL ?? null,
         age: ageNum,
         gender,
-        phone: fbUser.phoneNumber ?? normalizePhone(phone),
         handicap: {
           index: indexNum,
           // A client may only ever self-declare; a green/yellow badge is granted
@@ -69,14 +70,20 @@ export function Onboarding() {
         role: 'member',
         organizerMarkets: [],
         canCreatePaidEvents: false,
-        stripeCustomerId: null,
-        stripeConnectId: null,
         createdAt: serverTimestamp(),
         status: 'active',
         // Flyer/QR attribution captured on the landing page (?src=...), so
         // every league drop is measurable.
         referralSource: localStorage.getItem('thedraw.src') ?? null,
       });
+      const phoneE164 = fbUser.phoneNumber ?? normalizePhone(phone);
+      if (phoneE164) {
+        await setDoc(
+          doc(db, 'users', fbUser.uid, 'private', 'data'),
+          { phone: phoneE164 },
+          { merge: true },
+        );
+      }
       // AuthContext's snapshot listener will pick up the new profile.
     } catch (e) {
       setError((e as Error).message);

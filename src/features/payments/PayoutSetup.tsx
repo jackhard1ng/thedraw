@@ -10,26 +10,22 @@
  */
 import { useEffect, useState } from 'react';
 import { Button, Card, SectionHeader, Spinner } from '@/components/ui';
-import { useAuth } from '@/context/AuthContext';
 import { checkPayoutStatus, createConnectOnboardingLink } from '@/lib/callable';
 
 export function PayoutSetup() {
-  const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // undefined = still asking Stripe; false covers "never started" AND
-  // "started but abandoned the form" — the difference is the button label.
-  const [onboarded, setOnboarded] = useState<boolean | undefined>(
-    profile?.stripeConnectId ? undefined : false,
-  );
-  const started = profile?.stripeConnectId != null;
+  // undefined = still asking Stripe. `started` separates "never began" from
+  // "began and abandoned Stripe's form" — different button labels.
+  const [status, setStatus] = useState<{ onboarded: boolean; started: boolean } | undefined>();
 
   useEffect(() => {
-    if (!started) return;
     checkPayoutStatus({})
-      .then((res) => setOnboarded(res.data.onboarded))
-      .catch(() => setOnboarded(false));
-  }, [started]);
+      .then((res) => setStatus(res.data))
+      .catch(() => setStatus({ onboarded: false, started: false }));
+  }, []);
+  const onboarded = status?.onboarded;
+  const started = status?.started ?? false;
 
   async function start() {
     setBusy(true);

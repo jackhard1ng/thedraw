@@ -5,7 +5,7 @@
  * notify() fans out to it alongside in-app records and SMS.
  */
 import { getMessaging, getToken, isSupported } from 'firebase/messaging';
-import { arrayUnion, doc, updateDoc } from 'firebase/firestore';
+import { arrayUnion, doc, setDoc } from 'firebase/firestore';
 import { app, auth, db } from '@/lib/firebase';
 
 export async function pushSupported(): Promise<boolean> {
@@ -42,6 +42,12 @@ export async function enablePush(): Promise<'enabled' | 'denied' | 'unsupported'
   });
   if (!token) return 'denied';
 
-  await updateDoc(doc(db, 'users', uid), { fcmTokens: arrayUnion(token) });
+  // Tokens are PII-adjacent — they live on the private subdoc, not the
+  // signed-in-readable users doc.
+  await setDoc(
+    doc(db, 'users', uid, 'private', 'data'),
+    { fcmTokens: arrayUnion(token) },
+    { merge: true },
+  );
   return 'enabled';
 }

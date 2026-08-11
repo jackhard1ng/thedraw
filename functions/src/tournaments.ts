@@ -19,6 +19,10 @@ import {
   requireActive,
   requireOrganizer,
   getUser,
+  getPrivate,
+  setPrivate,
+  addThreadMembers,
+  removeThreadMembers,
   deriveStats,
   writeLedger,
 } from './shared';
@@ -168,6 +172,7 @@ export const createTournament = onCall(async (req) => {
       tournamentId: ref.id,
     });
   }
+  await addThreadMembers(ref.id, [uid]); // organizer can talk to the field
   return { tournamentId: ref.id };
 });
 
@@ -250,7 +255,7 @@ export const enterTournament = onCall(async (req) => {
         source: user.handicap.source,
         verifiedAtMs: user.handicap.verifiedAt ? user.handicap.verifiedAt.toMillis() : null,
       },
-      stripeCustomerId: user.stripeCustomerId,
+      stripeCustomerId: null, // unused: cards are collected inline at entry
     },
     t.eligibility,
     isPaid,
@@ -319,13 +324,14 @@ export const enterTournament = onCall(async (req) => {
       await backOutEntry(tournamentId, entryRef.id);
       throw new HttpsError('failed-precondition', 'Payments are not configured yet.');
     }
-    const customerId = await ensureCustomer(user.stripeCustomerId, {
+    const priv = await getPrivate(uid);
+    const customerId = await ensureCustomer(priv.stripeCustomerId, {
       uid,
-      phone: user.phone,
+      phone: priv.phone,
       name: user.displayName,
     });
-    if (customerId !== user.stripeCustomerId) {
-      await db.doc(`users/${uid}`).update({ stripeCustomerId: customerId });
+    if (customerId !== priv.stripeCustomerId) {
+      await setPrivate(uid, { stripeCustomerId: customerId });
     }
     const AUTH_HOLD_MAX_MS = 5 * 86_400_000;
     const closesMs = (t.registrationCloses as Timestamp).toMillis();
@@ -358,6 +364,9 @@ export const enterTournament = onCall(async (req) => {
       throw new HttpsError('internal', `Payment setup failed: ${(e as Error).message}`);
     }
   }
+
+  // Field chat membership — rules gate the thread on this.
+  await addThreadMembers(tournamentId, userIds);
 
   // Reputation: committing to an event you entered.
   return { entryId: entryRef.id, clientSecret, paymentMode };
@@ -437,6 +446,7 @@ export const withdrawEntry = onCall<{ entryId: string }>(async (req) => {
   }
   await db.doc(`tournaments/${e.tournamentId}`).update({ entryIds: FieldValue.arrayRemove(req.data.entryId) });
   await eRef.update({ status: 'withdrawn' });
+  await removeThreadMembers(e.tournamentId, (e as unknown as { userIds?: string[] }).userIds ?? [uid]);
   return { ok: true };
 });
 
@@ -513,10 +523,10 @@ export async function runClose(tournamentId: string) {
           await captureIntent(e.paymentIntentId);
           stripeRef = e.paymentIntentId;
         } else if (e.paymentStatus === 'methodSaved' && e.paymentMethodId) {
-          const user = (await db.doc(`users/${e.captainId}`).get()).data() as { stripeCustomerId?: string | null } | undefined;
+          const captainPriv = await getPrivate(e.captainId);
           const pi = await chargeSavedMethod({
             amountCents: t.entryFeeCents,
-            customerId: user?.stripeCustomerId as string,
+            customerId: captainPriv.stripeCustomerId as string,
             paymentMethodId: e.paymentMethodId,
             tournamentId,
             entryId: e.id,

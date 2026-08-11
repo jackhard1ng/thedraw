@@ -66,7 +66,18 @@ export function RoundPostCard({ post }: { post: PostWithId }) {
         </div>
 
         <div className="mt-3 flex items-center justify-between border-t border-rule pt-2 text-xs text-ink-faint">
-          <span>Posted {relativeDays(post.createdAt)}</span>
+          <span>
+            {post.creatorName ? (
+              <>
+                {post.creatorName}
+                {post.creatorIndex != null && (
+                  <Num className="ml-1">({post.creatorIndex.toFixed(1)})</Num>
+                )}
+                {' · '}
+              </>
+            ) : null}
+            {relativeDays(post.createdAt)}
+          </span>
           {full ? (
             <span className="font-display uppercase tracking-wide text-ink-faint">
               Full

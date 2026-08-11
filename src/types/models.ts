@@ -56,13 +56,16 @@ export interface User {
   photoUrl: string | null;
   age: number;
   gender: 'M' | 'F' | 'other';
-  phone: string;
+  /** @deprecated PII moved to users/{uid}/private/data — present on legacy docs only. */
+  phone?: string;
   handicap: Handicap;
   role: UserRole;
   organizerMarkets: string[]; // empty unless organizer
   canCreatePaidEvents: boolean; // separate flag from organizer
-  stripeCustomerId: string | null;
-  stripeConnectId: string | null; // only if they've received payouts
+  /** @deprecated moved to users/{uid}/private/data — present on legacy docs only. */
+  stripeCustomerId?: string | null;
+  /** @deprecated moved to users/{uid}/private/data — present on legacy docs only. */
+  stripeConnectId?: string | null;
   createdAt: Ts;
   status: UserStatus;
   /** Match alerts (opt-in): notify when a matching round posts in my market. */
@@ -136,6 +139,9 @@ export type RoundPostStatus = 'open' | 'full' | 'completed' | 'cancelled';
 export interface RoundPost {
   marketId: string;
   createdBy: string;
+  /** Denormalized at creation — who you'd be joining, no users read needed. */
+  creatorName?: string | null;
+  creatorIndex?: number | null;
   title: string | null;
   description: string | null;
   timing: {

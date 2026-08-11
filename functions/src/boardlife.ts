@@ -19,7 +19,7 @@
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-import { db, FieldValue, Timestamp, requireAuth, requireActive, writeReputation } from './shared';
+import { db, FieldValue, Timestamp, requireAuth, requireActive, writeReputation, addThreadMembers } from './shared';
 import { notify } from './lib/notify';
 
 // ---------------------------------------------------------------------------
@@ -233,9 +233,13 @@ export const attestRound = onCall<{ roundId: string }>(async (req) => {
 // ---------------------------------------------------------------------------
 export const onRoundPosted = onDocumentCreated('roundPosts/{postId}', async (event) => {
   const post = event.data?.data() as
-    | { marketId: string; createdBy: string; title: string | null; vibe: string }
+    | { marketId: string; createdBy: string; title: string | null; vibe: string; joinedUserIds?: string[] }
     | undefined;
   if (!post) return;
+
+  // Open the post's chat thread to its members (draw groups arrive with
+  // joinedUserIds already filled). Rules gate chat on this membership doc.
+  await addThreadMembers(event.params.postId, [post.createdBy, ...(post.joinedUserIds ?? [])]);
 
   const creator = (await db.doc(`users/${post.createdBy}`).get()).data() as
     | { displayName: string; handicap: { index: number } }

@@ -8,7 +8,7 @@
  * machinery still runs in dev and free tiers. Every send is also written to a
  * `notifications` collection as an in-app record.
  */
-import { db, FieldValue } from '../shared';
+import { db, FieldValue, getPrivate } from '../shared';
 
 export type NotifyChannel = 'sms' | 'push' | 'inApp';
 
@@ -39,10 +39,7 @@ export async function notify(args: {
 
 async function sendPush(userId: string, title: string, body: string, link: string | null) {
   try {
-    const user = (await db.doc(`users/${userId}`).get()).data() as
-      | { fcmTokens?: string[] }
-      | undefined;
-    const tokens = user?.fcmTokens ?? [];
+    const tokens = (await getPrivate(userId)).fcmTokens;
     if (tokens.length === 0) return;
     const { getMessaging } = await import('firebase-admin/messaging');
     const res = await getMessaging().sendEachForMulticast({
@@ -57,8 +54,9 @@ async function sendPush(userId: string, title: string, body: string, link: strin
       return err.includes('registration-token-not-registered') || err.includes('invalid-argument');
     });
     if (dead.length) {
-      const { FieldValue } = await import('firebase-admin/firestore');
-      await db.doc(`users/${userId}`).update({ fcmTokens: FieldValue.arrayRemove(...dead) });
+      await db
+        .doc(`users/${userId}/private/data`)
+        .set({ fcmTokens: FieldValue.arrayRemove(...dead) }, { merge: true });
     }
   } catch (e) {
     console.error(`[push:error] ${userId}: ${(e as Error).message}`);
@@ -73,8 +71,7 @@ async function sendSms(userId: string, message: string) {
     console.log(`[sms:noop] ${userId}: ${message.replace(/\n/g, ' ')}`);
     return;
   }
-  const user = await db.doc(`users/${userId}`).get();
-  const to = (user.data()?.phone as string) || '';
+  const to = (await getPrivate(userId)).phone;
   if (!to) return;
   const body = new URLSearchParams({ To: to, From: from, Body: message });
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
