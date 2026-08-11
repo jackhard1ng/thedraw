@@ -435,6 +435,31 @@ export function TournamentDetailPage() {
         )}
       </div>
 
+      {/* The field — who you'd be playing against, BEFORE you enter. Names and
+          frozen indexes are public by design (denormalized on entries), and a
+          league is the same faces weekly: show them. */}
+      {(entries ?? []).filter((e) => e.status !== 'withdrawn').length > 0 && (
+        <div className="mt-6">
+          <SectionHeader>The field</SectionHeader>
+          <div className="divide-y divide-rule">
+            {(entries ?? [])
+              .filter((e) => e.status !== 'withdrawn')
+              .sort((a, b) => a.combinedIndex - b.combinedIndex)
+              .map((e) => (
+                <div key={e.id} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="min-w-0 truncate text-ink">
+                    {e.teamName || (e as { displayNames?: string[] }).displayNames?.join(' / ') || 'Entered player'}
+                    {(e as { flight?: string | null }).flight && (
+                      <Badge tone="neutral">Flt {(e as { flight?: string | null }).flight}</Badge>
+                    )}
+                  </span>
+                  <Num className="shrink-0 text-ink-faint">{e.combinedIndex.toFixed(1)}</Num>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Registration window */}
       <div className="mt-6">
         <SectionHeader>Registration</SectionHeader>

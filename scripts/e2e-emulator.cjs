@@ -537,6 +537,41 @@ async function main() {
   const dnfCard = (await db.doc('scorecards/dnfT_e9_1').get()).data();
   check('overdue card closes as DNF (no frozen seasons)', dnfCard.status === 'dnf', dnfCard.status);
 
+  // ================= FLOW I — the league machine ============================
+  console.log('\nFLOW I — league season: auto-created weekly stops, rotating courses');
+  const { tourSweep } = require(path + '/lib/tour.js');
+  const wk1 = Date.now() + 2 * 86_400_000;
+  const { seriesId } = await call(fns.createTourSeries, 'org1', {
+    name: 'KC Tuesday League',
+    season: '2026 Summer',
+    schedule: {
+      firstStartAt: wk1,
+      weeks: 3,
+      countBest: 2,
+      entryFeeCents: 0, // free season — no paid-market gate needed in test
+      maxEntries: 24,
+      placeIds: ['netCourse', 'promoteMe'], // rotation: wk1 net, wk2 promote, wk3 net
+      flights: [{ min: 0, max: 9 }, { min: 9.1, max: 54 }],
+    },
+  });
+  check('series created with schedule', !!seriesId);
+  const stops1 = await db.collection('tourStops').where('seriesId', '==', seriesId).get();
+  check('week 1 stop exists immediately', stops1.size === 1 && stops1.docs[0].data().weekNumber === 1);
+  check('week 1 plays the first rotation course', stops1.docs[0].data().placeId === 'netCourse');
+
+  // Sweep just inside the 6-day lead window before week 2 → creates week 2.
+  await tourSweep(wk1 + 7 * 86_400_000 - 5 * 86_400_000);
+  const stops2 = await db.collection('tourStops').where('seriesId', '==', seriesId).get();
+  const wk2stop = stops2.docs.map((d) => d.data()).find((s) => s.weekNumber === 2);
+  check('sweep auto-created week 2', stops2.size === 2 && !!wk2stop);
+  check('week 2 rotates to the second course', wk2stop?.placeId === 'promoteMe');
+  // Sweep again at the same instant: week 3 is still outside the lead window.
+  await tourSweep(wk1 + 7 * 86_400_000 - 5 * 86_400_000);
+  const stops3 = await db.collection('tourStops').where('seriesId', '==', seriesId).get();
+  check('sweep is idempotent inside the window', stops3.size === 2);
+  const wk2t = (await db.doc(`tournaments/${wk2stop.tournamentId}`).get()).data();
+  check('stop fee is configurable, not 25%-hardcoded', wk2t.adminFeePercent === 0, wk2t.adminFeePercent);
+
   // ================= FLOW H — course data entry + promotion ==================
   console.log('\nFLOW H — course data entry (listed → supported)');
   await db.doc('courses/promoteMe').set({

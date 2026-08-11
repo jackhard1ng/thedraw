@@ -391,8 +391,12 @@ export const enterTournament = onCall(async (req) => {
     }
   }
 
-  // Field chat membership — rules gate the thread on this.
+  // Field chat membership — rules gate the thread on this. A tour stop also
+  // joins the SERIES thread: one persistent league room across all 18 weeks,
+  // not a disposable chat per stop.
   await addThreadMembers(tournamentId, userIds);
+  const seriesId = (t as { seriesId?: string }).seriesId;
+  if (seriesId) await addThreadMembers(seriesId, userIds);
 
   // Reputation: committing to an event you entered.
   return { entryId: entryRef.id, clientSecret, paymentMode };
@@ -637,13 +641,13 @@ export async function runClose(tournamentId: string) {
     // with a flighted format splits into even bands by frozen combined index.
     let bands: { name: string; min: number; max: number }[] | null = null;
     const stop = (await db.doc(`tourStops/${tournamentId}`).get()).data() as
-      | { flights?: [number, number][] }
+      | { flights?: { min: number; max: number }[] }
       | undefined;
     if (stop?.flights?.length) {
-      bands = stop.flights.map(([min, max], i) => ({
+      bands = stop.flights.map((f, i) => ({
         name: String.fromCharCode(65 + i),
-        min,
-        max,
+        min: f.min,
+        max: f.max,
       }));
     } else if (format?.flightBy && format.flightBy !== 'none' && entries.length >= 8) {
       const n = entries.length >= 18 ? 3 : 2;

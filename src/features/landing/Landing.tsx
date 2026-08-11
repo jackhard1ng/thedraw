@@ -95,8 +95,8 @@ export function Landing() {
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">
         {[
           ['One tap in', 'Enter the weekend draw and get grouped with players at your level. Somebody in your group books — like your regular crew would.'],
-          ['Real competition', 'Match play brackets, gross foursomes, a season order of merit. Your record is public and permanent.'],
-          ['On your schedule', 'No Tuesday-night-only. Matches happen whenever both players can play — deadlines keep it honest.'],
+          ['Fair at every level', 'Handicapped formats, flights, and net purses mean a 16 beats a 5 on the right day. You don’t have to be good — you have to show up.'],
+          ['Leagues that fit', 'Weeknight league seasons at a rotating course — miss a week and your best weeks still count. Plus weekend tournaments and matches on your own schedule.'],
         ].map(([h, b]) => (
           <div key={h} className="flex gap-3">
             <span className="mt-0.5 font-display uppercase tracking-wide text-xs text-tournament">

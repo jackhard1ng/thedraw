@@ -17,6 +17,7 @@ import { finalizeMatch, forfeitMatch } from './matches';
 import { maybeCompleteTournament } from './completion';
 import { boardSweep } from './boardlife';
 import { drawSweep } from './draw';
+import { tourSweep } from './tour';
 import { notify } from './lib/notify';
 import { accountPayoutsEnabled, payout as stripePayout, stripeEnabled } from './lib/stripe';
 
@@ -32,6 +33,7 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await bookingWindowSweep(now);
   await boardSweep(now);
   await drawSweep(now);
+  await tourSweep(now);
   await settlePendingPayouts();
 });
 

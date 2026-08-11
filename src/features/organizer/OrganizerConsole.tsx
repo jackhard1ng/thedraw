@@ -124,7 +124,10 @@ export function OrganizerConsole() {
         <Link to="/organizer/new" className="btn btn-primary">
           + New tournament
         </Link>
-        <Link to="/organizer/verify" className="btn btn-ghost">
+        <Link to="/organizer/league" className="btn btn-primary">
+          + Start a league
+        </Link>
+        <Link to="/organizer/verify" className="btn btn-ghost col-span-2">
           Verify / rule
         </Link>
       </div>

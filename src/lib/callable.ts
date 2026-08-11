@@ -243,8 +243,25 @@ export const createInstantEvent = httpsCallable<
 >(functions, 'createInstantEvent');
 
 // ---- Tour stops (addendum §7 — the backbone of a season) -------------------
+// With a schedule, the series IS the league: week 1 is created immediately and
+// the hourly sweep auto-creates each following week (rotating through
+// placeIds). Standings count each player's best `countBest` weeks.
 export const createTourSeries = httpsCallable<
-  { name: string; season: string },
+  {
+    name: string;
+    season: string;
+    schedule?: {
+      firstStartAt: number;
+      weeks: number;
+      entryFeeCents: number;
+      adminFeePercent?: number;
+      maxEntries: number;
+      teeTimesHeld?: number;
+      placeIds: string[];
+      flights?: { min: number; max: number }[];
+      countBest?: number;
+    };
+  },
   { seriesId: string }
 >(functions, 'createTourSeries');
 export const createTourStop = httpsCallable<
@@ -256,7 +273,7 @@ export const createTourStop = httpsCallable<
     teeTimesHeld: number;
     entryFeeCents: number;
     maxEntries: number;
-    flights: [number, number][];
+    flights: { min: number; max: number }[];
   },
   { tournamentId: string }
 >(functions, 'createTourStop');

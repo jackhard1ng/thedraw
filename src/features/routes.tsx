@@ -22,6 +22,7 @@ import { ResultsFeed } from '@/features/spectating/ResultsFeed';
 import { OrderOfMerit } from '@/features/spectating/OrderOfMerit';
 import { OrganizerConsole } from '@/features/organizer/OrganizerConsole';
 import { CreateTournamentForm } from '@/features/organizer/CreateTournamentForm';
+import { CreateLeagueForm } from '@/features/organizer/CreateLeagueForm';
 import { VerifyHandicapPanel } from '@/features/organizer/VerifyHandicapPanel';
 import { ReviewRequests } from '@/features/organizer/ReviewRequests';
 import { RequestEventForm } from '@/features/organizer/RequestEventForm';
@@ -42,6 +43,7 @@ export const featureRoutes = [
   <Route key="standings" path="/standings" element={<OrderOfMerit />} />,
   <Route key="organizer" path="/organizer" element={<OrganizerConsole />} />,
   <Route key="organizer-new" path="/organizer/new" element={<CreateTournamentForm />} />,
+  <Route key="organizer-league" path="/organizer/league" element={<CreateLeagueForm />} />,
   <Route key="organizer-verify" path="/organizer/verify" element={<VerifyHandicapPanel />} />,
   <Route key="organizer-requests" path="/organizer/requests" element={<ReviewRequests />} />,
   <Route key="request-event" path="/request-event" element={<RequestEventForm />} />,

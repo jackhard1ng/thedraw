@@ -28,9 +28,13 @@ export function ChatThread({ threadId }: { threadId: string }) {
       collection(db, 'threads', threadId, 'messages'),
       orderBy('createdAt', 'asc'),
     );
-    return onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ChatMessage) })));
-    });
+    return onSnapshot(
+      q,
+      (snap) => {
+        setMessages(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ChatMessage) })));
+      },
+      () => setMessages([]), // not a member (rules) — render empty, not stuck
+    );
   }, [threadId]);
 
   useEffect(() => {
