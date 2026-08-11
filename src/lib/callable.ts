@@ -167,6 +167,12 @@ export const leaveDraw = httpsCallable<{ day: string }, { ok: boolean }>(
   'leaveDraw',
 );
 
+// ---- Run it back: clone a completed round for next week, group pre-invited -
+export const rerunPost = httpsCallable<{ postId: string }, { postId: string }>(
+  functions,
+  'rerunPost',
+);
+
 // ---- Confirm a tee time on a board post / draw group (booker-only) ---------
 export const confirmTeeTime = httpsCallable<
   { postId: string; teeTime: number; placeId?: string | null; courseName?: string | null },

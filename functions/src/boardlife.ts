@@ -21,6 +21,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { db, FieldValue, Timestamp, requireAuth, requireActive, writeReputation, addThreadMembers } from './shared';
 import { notify } from './lib/notify';
+import { nextOccurrenceEnd } from './draw';
 
 // ---------------------------------------------------------------------------
 // 1 + 2 — the hourly sweep (called from scheduled.tick)
@@ -195,6 +196,85 @@ export const confirmTeeTime = onCall<{
 });
 
 // ---------------------------------------------------------------------------
+// rerunPost — "run it back": one tap turns a completed round's group into next
+// week's post, same people pre-invited. THE retention mechanism for the player
+// with no regular crew: the app's job isn't one good Saturday, it's making the
+// second one automatic.
+// ---------------------------------------------------------------------------
+export const rerunPost = onCall<{ postId: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const user = await requireActive(uid);
+  const src = (await db.doc(`roundPosts/${req.data.postId}`).get()).data() as
+    | (Record<string, unknown> & {
+        createdBy: string;
+        joinedUserIds: string[];
+        status: string;
+        slotsTotal: number;
+        title: string | null;
+        timing: { mode: string; fixedTime: Timestamp | null; flexibleDays: string[] | null };
+      })
+    | undefined;
+  if (!src) throw new HttpsError('not-found', 'Post not found.');
+  if (src.status !== 'completed') {
+    throw new HttpsError('failed-precondition', 'Run it back once the round is done.');
+  }
+  const group = [src.createdBy, ...src.joinedUserIds];
+  if (!group.includes(uid)) {
+    throw new HttpsError('permission-denied', 'Only someone who was in the group can run it back.');
+  }
+
+  // Same slot one week later; a fixed time advances by weeks until it's ahead
+  // of now, a flexible post keeps its days with a fresh target date.
+  let fixedTime: Timestamp | null = null;
+  if (src.timing.mode === 'fixed' && src.timing.fixedTime) {
+    let ms = src.timing.fixedTime.toMillis();
+    while (ms <= Date.now()) ms += 7 * 86_400_000;
+    fixedTime = Timestamp.fromMillis(ms);
+  }
+  const others = group.filter((u) => u !== uid);
+
+  const newRef = await db.collection('roundPosts').add({
+    ...src,
+    createdBy: uid, // the tapper hosts (and books) the rematch
+    creatorName: user.displayName,
+    creatorIndex: user.handicap.index,
+    timing: {
+      ...src.timing,
+      fixedTime,
+      // A rerun of a fixed-time post stays fixed; flexible stays flexible.
+    },
+    ...(src.timing.mode !== 'fixed' && src.timing.flexibleDays?.length
+      ? {
+          targetDate: Timestamp.fromMillis(
+            nextOccurrenceEnd(src.timing.flexibleDays[0], Date.now()),
+          ),
+        }
+      : {}),
+    booking: 'needsBooking',
+    bookerNudgeSent: false,
+    joinedUserIds: others,
+    slotsFilled: group.length,
+    slotsTotal: Math.max(src.slotsTotal, group.length),
+    status: group.length >= Math.max(src.slotsTotal, group.length) ? 'full' : 'open',
+    drawMatched: false,
+    rerunOfId: req.data.postId,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+  await addThreadMembers(newRef.id, group);
+
+  for (const u of others) {
+    await notify({
+      userId: u,
+      title: 'Running it back',
+      body: `${user.displayName} rebooked your group for next week — you're already in. Tap to see it (or leave if you can't make it).`,
+      deadlineCritical: true,
+      link: `/post/${newRef.id}`,
+    });
+  }
+  return { postId: newRef.id };
+});
+
+// ---------------------------------------------------------------------------
 // 1 — attestRound: a groupmate vouches for a score (§P3 witness)
 // ---------------------------------------------------------------------------
 export const attestRound = onCall<{ roundId: string }>(async (req) => {
@@ -240,6 +320,24 @@ export const onRoundPosted = onDocumentCreated('roundPosts/{postId}', async (eve
   // Open the post's chat thread to its members (draw groups arrive with
   // joinedUserIds already filled). Rules gate chat on this membership doc.
   await addThreadMembers(event.params.postId, [post.createdBy, ...(post.joinedUserIds ?? [])]);
+
+  // Followers hear about a new post FIRST — following someone is the shy
+  // player's way of saying "tell me when these guys play again."
+  const followers = await db
+    .collection('follows')
+    .where('targetId', '==', post.createdBy)
+    .limit(200)
+    .get();
+  for (const f of followers.docs) {
+    const followerId = (f.data() as { followerId: string }).followerId;
+    if ((post.joinedUserIds ?? []).includes(followerId)) continue; // already in it
+    await notify({
+      userId: followerId,
+      title: 'Someone you follow posted a round',
+      body: `${post.title ?? 'A new round'} just went on the board — you follow the poster.`,
+      link: `/post/${event.params.postId}`,
+    });
+  }
 
   const creator = (await db.doc(`users/${post.createdBy}`).get()).data() as
     | { displayName: string; handicap: { index: number } }

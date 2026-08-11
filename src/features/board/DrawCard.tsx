@@ -43,7 +43,12 @@ export function DrawCard() {
   }, [marketId]);
 
   const mine = open.find((r) => r.userId === fbUser?.uid && r.day === day);
-  const countForDay = open.filter((r) => r.day === day).length;
+  // Count only entrants matchable WITH HIM (±8 index) — "5 in for Sat" would
+  // over-promise when all five are scratch players he can never group with.
+  const myIndex = profile?.handicap.index ?? 0;
+  const countForDay = open.filter(
+    (r) => r.day === day && Math.abs(r.index - myIndex) <= 8,
+  ).length;
 
   async function toggle() {
     setBusy(true);
@@ -65,7 +70,7 @@ export function DrawCard() {
           Enter the draw
         </p>
         <span className="text-xs text-ink-faint">
-          <Num>{countForDay}</Num> in for {day.slice(0, 3)}
+          <Num>{countForDay}</Num> near your level in for {day.slice(0, 3)}
         </span>
       </div>
       <p className="mt-1 text-sm text-ink-soft">

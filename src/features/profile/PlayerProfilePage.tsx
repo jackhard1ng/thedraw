@@ -10,6 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Badge, Card, Num, SectionHeader, Spinner } from '@/components/ui';
+import { FollowButton } from '@/features/spectating/FollowButton';
 import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { formatTeeTime } from '@/lib/format';
 import { formatCents } from '@/lib/money';
@@ -139,10 +140,12 @@ export function PlayerProfilePage() {
             {user.displayName.slice(0, 1)}
           </div>
         )}
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl">{user.displayName}</h1>
           <p className="text-sm text-ink-faint">{user.marketId.toUpperCase()}</p>
         </div>
+        {/* Follow = "tell me when they play again" — alerts on their posts. */}
+        <FollowButton targetId={uid} />
       </div>
 
       <Card className="mt-6 p-4">

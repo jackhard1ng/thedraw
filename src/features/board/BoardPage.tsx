@@ -134,10 +134,16 @@ export function BoardPage() {
       ) : visible.length === 0 ? (
         <div className="rounded-sm border border-dashed border-rule-strong p-8 text-center">
           <p className="font-display uppercase tracking-wide text-ink-soft">
-            Nothing on the board yet
+            Nothing on the board right now
           </p>
           <p className="mt-1 text-sm text-ink-faint">
-            Post a tee time and someone will fill it.
+            Enter the draw above and we'll build you a group — or turn on
+            alerts (
+            <Link to="/me" className="text-tournament underline underline-offset-2">
+              Profile → Alerts
+            </Link>
+            ) to get pinged the moment someone at your level posts. Have a tee
+            time already? Post it and someone will fill it.
           </p>
           <Link to="/post/new" className="mt-4 inline-block">
             <Button variant="primary">Post a round</Button>

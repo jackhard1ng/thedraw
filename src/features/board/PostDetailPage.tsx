@@ -9,7 +9,7 @@ import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/fire
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { usePost } from './useRoundPosts';
-import { attestRound, confirmTeeTime, joinRound, leaveRound } from '@/lib/callable';
+import { attestRound, confirmTeeTime, joinRound, leaveRound, rerunPost } from '@/lib/callable';
 import type { Round } from '@/types/models';
 import { PlacesAutocomplete, type CoursePick } from '@/features/courses/PlacesAutocomplete';
 import { PushNudge } from '@/features/notifications/PushNudge';
@@ -335,7 +335,10 @@ export function PostDetailPage() {
       </Card>
 
       {post.status === 'completed' && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
+          {/* THE retention tap: one good round becomes next week's round with
+              the same group pre-invited. */}
+          {(isJoined || isOwner) && <RunItBack postId={post.id} />}
           <GroupScores
             postId={post.id}
             placeId={post.course.placeId}
@@ -349,14 +352,53 @@ export function PostDetailPage() {
         <PushNudge context="Turn on notifications for tee-time confirmations and group chat." />
       )}
 
-      {(isJoined || isOwner) && post.status !== 'completed' && (
+      {/* Chat lives as long as the group does — a good round's thread is where
+          "same time next week?" happens, so completion must not kill it. */}
+      {(isJoined || isOwner) && post.status !== 'cancelled' && (
         <div className="mt-6">
-          <h2 className="mb-2 text-lg">Coordinate</h2>
+          <h2 className="mb-2 text-lg">
+            {post.status === 'completed' ? 'Group chat' : 'Coordinate'}
+          </h2>
           <Card className="p-4">
             <ChatThread threadId={post.id} />
           </Card>
         </div>
       )}
     </div>
+  );
+}
+
+/** One tap re-creates this post one week out with the same group invited. */
+function RunItBack({ postId }: { postId: string }) {
+  const nav = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <Card className="border-tournament/30 p-4">
+      <p className="text-sm text-ink">Good group?</p>
+      <p className="mt-1 text-xs text-ink-faint">
+        One tap posts the same round for next week — everyone here is invited
+        automatically and gets a text.
+      </p>
+      <Button
+        variant="primary"
+        className="mt-3 w-full"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            const res = await rerunPost({ postId });
+            nav(`/post/${res.data.postId}`);
+          } catch (e) {
+            setError((e as Error).message);
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? '…' : 'Run it back next week'}
+      </Button>
+      {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+    </Card>
   );
 }

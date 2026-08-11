@@ -379,6 +379,18 @@ async function main() {
   const playedRep = await db.collection('reputationEvents').where('userId', '==', 'p2').where('type', '==', 'played').get();
   check('played reputation written on attest', playedRep.size >= 1);
 
+  // Run it back: a GROUP MEMBER (p2, not the creator) reruns the completed
+  // post — new post next week, same group pre-invited, tapper hosts.
+  let outsiderRerun = false;
+  try { await call(fns.rerunPost, 'p3', { postId: 'standing1' }); } catch { outsiderRerun = true; }
+  check('outsider cannot run it back', outsiderRerun);
+  const rerun = await call(fns.rerunPost, 'p2', { postId: 'standing1' });
+  const rr = (await db.doc(`roundPosts/${rerun.postId}`).get()).data();
+  check('rerun exists, hosted by the tapper', rr.createdBy === 'p2' && rr.rerunOfId === 'standing1');
+  check('rerun pre-invites the rest of the group', rr.joinedUserIds.length === 1 && rr.joinedUserIds[0] === 'p1');
+  check('rerun is full and needs booking', rr.status === 'full' && rr.booking === 'needsBooking');
+  check('rerun tee time moved to a future week', rr.timing.fixedTime.toMillis() > Date.now());
+
   // ================= FLOW F — Enter the Draw ================================
   console.log('\nFLOW F — Enter the Draw');
   // p5 is a 25-index outlier who must NOT be grouped with the 4-12 band.

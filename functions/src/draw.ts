@@ -121,13 +121,33 @@ export async function drawSweep(now: number) {
     await notify({
       userId: r.userId,
       title: 'Draw entry expired',
-      body: `Nobody matched for ${r.day} this week — it happens early on. Tap to re-enter; new players join daily.`,
+      body: `Nobody matched for ${r.day} this week — it happens early on. Re-enter any time, and turn on round alerts (Profile → Alerts) to get pinged the moment someone at your level posts.`,
       link: '/',
     });
   }
 
   const openSnap = await db.collection('playRequests').where('status', '==', 'open').get();
   const open = openSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Req, 'id'>) }));
+
+  // Mid-TTL "still looking" — three silent days into a 7-day entry deserves a
+  // signal that the machine is alive, plus the honest picture at their level.
+  for (const doc of openSnap.docs) {
+    const r = doc.data() as { userId: string; day: string; index: number; createdAt: Timestamp; midNoticeSent?: boolean };
+    if (r.midNoticeSent || now - r.createdAt.toMillis() < 3 * 86_400_000) continue;
+    const nearby = open.filter(
+      (o) => o.userId !== r.userId && Math.abs(o.index - r.index) <= MAX_INDEX_SPREAD,
+    ).length;
+    await doc.ref.update({ midNoticeSent: true });
+    await notify({
+      userId: r.userId,
+      title: `Still looking for your ${r.day} group`,
+      body:
+        nearby > 0
+          ? `${nearby} player${nearby === 1 ? ' is' : 's are'} in the draw near your level (some for other days). Hold tight — groups form the moment days line up.`
+          : 'Nobody near your level is in the draw yet this week. Turn on round alerts (Profile → Alerts) and we\'ll ping you when a matching round posts.',
+      link: '/',
+    });
+  }
 
   // Bucket by market + day.
   const buckets = new Map<string, Req[]>();
