@@ -59,9 +59,11 @@ export function InstantEventPage() {
     );
   }, [marketId]);
 
+  // A free template (min = max = $0) needs no fee input at all.
+  const isFreeTemplate = !!tpl && tpl.entryFeeMaxCents === 0;
   let feeCents = 0;
   let feeError: string | null = null;
-  if (tpl && fee) {
+  if (tpl && fee && !isFreeTemplate) {
     try {
       feeCents = dollarsToCents(fee);
       if (feeCents < tpl.entryFeeMinCents || feeCents > tpl.entryFeeMaxCents) {
@@ -72,9 +74,17 @@ export function InstantEventPage() {
     }
   }
 
-  const valid = !!tpl && !!startsAt && feeCents > 0 && !feeError && !!shape;
+  const valid =
+    !!tpl && !!startsAt && !feeError && !!shape && (isFreeTemplate || feeCents > 0);
   const item = tpl && feeCents ? itemizeEntry(feeCents, tpl.adminFeePercent) : null;
-  const pool = item && tpl ? item.prizeCents * tpl.fieldSize : 0;
+  // Mirror the server's pool math including the $10 event minimum — the
+  // preview must never show a bigger purse than completion will pay.
+  const rawPool = item && tpl ? item.prizeCents * tpl.fieldSize : 0;
+  const floorShortfall =
+    item && tpl && tpl.adminFeePercent > 0
+      ? Math.max(0, 1000 - item.adminCents * tpl.fieldSize)
+      : 0;
+  const pool = Math.max(0, rawPool - floorShortfall);
   const shapeShares = shape ? SHAPE_LABEL[shape]?.shares ?? [] : [];
   const prizes = pool && shapeShares.length ? splitPurse(pool, shapeShares) : [];
 
@@ -149,15 +159,21 @@ export function InstantEventPage() {
                 onChange={(e) => setStartsAt(e.target.value)}
               />
             </Field>
-            <Field label="Entry fee" hint={feeError ?? undefined}>
-              <input
-                className="field-input tnum"
-                inputMode="decimal"
-                placeholder="$50"
-                value={fee}
-                onChange={(e) => setFee(e.target.value)}
-              />
-            </Field>
+            {isFreeTemplate ? (
+              <Field label="Entry fee">
+                <p className="field-input flex items-center text-pine">Free</p>
+              </Field>
+            ) : (
+              <Field label="Entry fee" hint={feeError ?? undefined}>
+                <input
+                  className="field-input tnum"
+                  inputMode="decimal"
+                  placeholder="$50"
+                  value={fee}
+                  onChange={(e) => setFee(e.target.value)}
+                />
+              </Field>
+            )}
           </div>
 
           <Field label="Payout shape">

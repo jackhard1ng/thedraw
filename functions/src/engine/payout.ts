@@ -17,7 +17,9 @@
  */
 import { splitPurse, type Cents } from './money';
 
-export type Division = 'gross' | 'net';
+// 'gross' | 'net' | a flight name like 'flight:A' — payout rows and standings
+// agree on the string, so flighted purses need no special casing here.
+export type Division = string;
 export interface PayoutRow {
   division: Division;
   place: number;

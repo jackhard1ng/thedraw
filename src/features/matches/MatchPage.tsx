@@ -46,6 +46,7 @@ import {
   entriesRemainingAt,
   entryDisplay,
   useMatch,
+  useFormat,
   useTournament,
   useTournamentEntries,
   useUsers,
@@ -271,6 +272,7 @@ export function MatchPage() {
   const { fbUser } = useAuth();
   const { match, loading } = useMatch(id);
   const { tournament } = useTournament(match?.tournamentId);
+  const format = useFormat(tournament?.formatId);
   const entryList = useTournamentEntries(match?.tournamentId);
   const users = useUsers((entryList ?? []).flatMap((e) => e.userIds));
   const [course, setCourse] = useState<Course | null>(null);
@@ -318,6 +320,10 @@ export function MatchPage() {
     courseName: course?.name ?? null,
     holeHandicapOrder: course?.holeHandicapOrder ?? null,
     teeSets: course?.teeSets ?? null,
+    // An explicitly-scratch format (allowance type 'none') gives no strokes —
+    // without this a "scratch nine" would still promise a 12-stroke spread.
+    scratch:
+      (format?.handicapAllowance as { type?: string } | null)?.type === 'none',
   });
 
   const log = match.scheduling.availabilityLog;

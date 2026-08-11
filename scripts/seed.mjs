@@ -106,10 +106,13 @@ FORMATS.push(
   },
   {
     id: 'nineHoleMatch',
-    name: '9-Hole Match',
+    name: '9-Hole Match (scratch)',
     teamSize: 1,
     scoring: 'matchPlay',
-    handicapAllowance: null, // scratch 9s in v1
+    // Explicitly scratch — {type:'none'} (vs null, which for match play means
+    // "full index difference"). The pre-match card says so instead of
+    // inventing a stroke spread.
+    handicapAllowance: { type: 'none' },
     advancement: 'bracket',
     holes: 9,
     flightBy: 'individualIndex',
@@ -124,6 +127,40 @@ console.log(`Seeded ${FORMATS.length} formats`);
 // Instant-event templates (addendum §2) — the 10% tier. Members instantiate
 // these; the template is the organizer's act.
 const TEMPLATES = [
+  {
+    // Day-one on-ramp: FREE, 9 holes, runs at 4+. A brand-new market has
+    // something enterable the moment the second player signs up — and a free
+    // event is the apprenticeship path toward money-event eligibility.
+    id: 'freeNine',
+    marketId: 'kc',
+    name: 'Open Nine — Free',
+    formatId: 'twilightNine',
+    fieldSize: 8,
+    fieldSizeMin: 4,
+    entryFeeMinCents: 0,
+    entryFeeMaxCents: 0,
+    allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 0,
+    requiresGhinAboveCents: 999999,
+    active: true,
+  },
+  {
+    // Tier-banded: C/D players only (index 10.1+). The whole point of tiers —
+    // a 16 competes against 14s and 19s, not against the club champion.
+    id: 'cdNine',
+    marketId: 'kc',
+    name: 'C/D Flight Nine (10.1+ only)',
+    formatId: 'twilightNine',
+    indexRange: [10.1, 54],
+    fieldSize: 8,
+    fieldSizeMin: 4,
+    entryFeeMinCents: 1000,
+    entryFeeMaxCents: 5000,
+    allowedPayoutShapes: ['70_30', 'winnerTakeAll'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
   {
     // The flagship: 8–16 players, Saturday morning stroke play, done by noon —
     // trophy settled before college football kicks off. Runs at 8+, caps at 16.

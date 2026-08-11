@@ -27,6 +27,7 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await enforceSchedulingDeadlines(now);
   await autoConfirmResults(now);
   await autoConfirmScorecards(now);
+  await dnfSweep(now);
   await weatherSweep(now);
   await bookingWindowSweep(now);
   await boardSweep(now);
@@ -232,6 +233,33 @@ async function autoConfirmScorecards(now: number) {
         link: `/tournaments/${sc.tournamentId}/leaderboard`,
       });
     }
+  }
+  for (const tid of touched) await maybeCompleteTournament(tid);
+}
+
+/**
+ * DNF sweep (§P1): a scorecard still awaiting its result after the round
+ * deadline closes as DNF — no score, no place, no held-hostage event. Without
+ * this, one player skipping week 7 would freeze an 18-week league's
+ * completion (and everyone's payouts) forever.
+ */
+export async function dnfSweep(now: number) {
+  const due = await db
+    .collection('scorecards')
+    .where('status', '==', 'awaitingResult')
+    .where('dueAt', '<=', Timestamp.fromMillis(now))
+    .get();
+  const touched = new Set<string>();
+  for (const d of due.docs) {
+    const sc = d.data() as { tournamentId: string; userId: string; round: number };
+    await d.ref.update({ status: 'dnf' });
+    touched.add(sc.tournamentId);
+    await notify({
+      userId: sc.userId,
+      title: `Round ${sc.round}: recorded as DNF`,
+      body: 'The deadline passed with no score, so this round closed as a DNF. The event moves on without it — jump back in next round.',
+      link: `/tournaments/${sc.tournamentId}/leaderboard`,
+    });
   }
   for (const tid of touched) await maybeCompleteTournament(tid);
 }

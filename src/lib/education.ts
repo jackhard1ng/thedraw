@@ -45,6 +45,8 @@ export function preMatchCard(args: {
   holeHandicapOrder: number[] | null;
   /** Rated tee sets at the course, when known — enables the tee alternative. */
   teeSets?: { name: string; rating: number }[] | null;
+  /** True for a format that is EXPLICITLY scratch (handicapAllowance type 'none'). */
+  scratch?: boolean;
 }): PreMatchCard {
   const {
     entriesRemaining,
@@ -55,15 +57,20 @@ export function preMatchCard(args: {
     courseName,
     holeHandicapOrder,
     teeSets,
+    scratch,
   } = args;
 
   const youGets = youIndex >= oppIndex;
   const high = Math.max(youIndex, oppIndex);
   const low = Math.min(youIndex, oppIndex);
-  const { strokes, holes, perHoleBase } = matchStrokeHoles(high, low, holeHandicapOrder);
+  const { strokes, holes, perHoleBase } = scratch
+    ? { strokes: 0, holes: [] as number[], perHoleBase: 0 }
+    : matchStrokeHoles(high, low, holeHandicapOrder);
 
   const strokesLine =
-    strokes === 0
+    scratch
+      ? 'Scratch format — no strokes, straight up by design.'
+      : strokes === 0
       ? 'Scratch match — no strokes given.'
       : youGets
         ? `You get ${strokes} stroke${strokes === 1 ? '' : 's'}.`
@@ -135,6 +142,9 @@ export function strokesRule(format: {
   const a = format.handicapAllowance as
     | { type?: string; percent?: number; low?: number; high?: number }
     | null;
+  if (a && a.type === 'none') {
+    return 'Scratch — no strokes for anyone, by design. Straight up.';
+  }
   if (format.scoring === 'matchPlay') {
     return 'Strokes: the difference between your two indexes, taken on the hardest holes on the card. Equal indexes = scratch match, no strokes.';
   }

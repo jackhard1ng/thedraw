@@ -100,6 +100,7 @@ export const createTournament = onCall(async (req) => {
     eligibility?: Partial<EligibilityRules>;
     structure: 'bracket' | 'pods';
     roundDeadlineDays: number;
+    placeId?: string | null; // designated course (enables net at that course)
     fromRequestId?: string;
   };
 
@@ -121,6 +122,25 @@ export const createTournament = onCall(async (req) => {
   const format = await getFormat(d.formatId);
   if (isPaid && !format.eligibleForMoney) {
     throw new HttpsError('failed-precondition', 'This format is not eligible for money events.');
+  }
+
+  // A NET division needs a rated course, or its standings come up empty and
+  // its published purse would quietly flow to the gross winner — the exact
+  // player the net division exists to protect would fund the shark's prize.
+  const hasNetRows = d.payoutTable.some((r) => r.division === 'net');
+  if ((hasNetRows || d.divisionMode === 'netOnly') && format.scoring !== 'matchPlay') {
+    const netCourseId = format.designatedCourses?.[0] ?? d.placeId ?? null;
+    const course = netCourseId
+      ? ((await db.doc(`courses/${netCourseId}`).get()).data() as
+          | { tier: string; teeSets: unknown[] | null }
+          | undefined)
+      : undefined;
+    if (course?.tier !== 'supported' || !course.teeSets?.length) {
+      throw new HttpsError(
+        'failed-precondition',
+        'A net division needs a designated course with slope/rating on file. Pick a supported course (or ask to have its tee data added), or make the event gross-only.',
+      );
+    }
   }
 
   // The index is LOAD-BEARING when it decides entry (a band), strokes (an
@@ -161,6 +181,7 @@ export const createTournament = onCall(async (req) => {
     eligibility,
     structure: d.structure,
     roundDeadlineDays: d.roundDeadlineDays ?? 7,
+    placeId: d.placeId ?? null,
     status: 'draft',
     entryIds: [],
   });
@@ -271,6 +292,9 @@ export const enterTournament = onCall(async (req) => {
   // need the auth-gated users collection, which carries phones and ages.
   const userIds = [uid];
   const displayNames = [user.displayName];
+  // Per-player indexes frozen individually (§4) — team allowances like the
+  // 35/15 scramble formula need WHO is the 6 and who is the 7, not their sum.
+  const indexes = [user.handicap.index];
   let combinedIndex = user.handicap.index;
   if (format.teamSize > 1) {
     if (!partnerId) throw new HttpsError('invalid-argument', 'This format needs a partner.');
@@ -278,6 +302,7 @@ export const enterTournament = onCall(async (req) => {
     if (partner.status === 'banned') throw new HttpsError('failed-precondition', 'Partner is not eligible.');
     userIds.push(partnerId);
     displayNames.push(partner.displayName);
+    indexes.push(partner.handicap.index);
     combinedIndex = user.handicap.index + partner.handicap.index; // frozen sum (§4)
   }
 
@@ -300,6 +325,7 @@ export const enterTournament = onCall(async (req) => {
       teamName: teamName ?? null,
       captainId: uid,
       combinedIndex,
+      indexes, // per-player, frozen — feeds team allowances (35/15 scramble)
       flight: null, // assigned + frozen at closeRegistration
       seed: 0,
       paymentIntentId: null,
@@ -594,19 +620,67 @@ export async function runClose(tournamentId: string) {
     await createPodMatches(tournamentId, pods);
   } else {
     // Stroke play (gross foursome, multi-round) — scorecards, no matches. The
-    // stroke rule freezes here: gross formats get no strokes; net formats get
-    // a playing handicap from the designated course's tee data × allowance.
+    // stroke rule freezes here: gross formats get no strokes; net/allowance
+    // formats (flat percent OR the 35/15 two-man scramble spec) get a playing
+    // handicap from the designated course's tee data. When the format names no
+    // designated courses, the event's own placeId serves — an instant scramble
+    // at Swope gets real net scoring without a format edit.
     const rounds = format?.rounds ?? 1;
-    const allowancePercent =
-      format?.handicapAllowance && typeof format.handicapAllowance.percent === 'number'
-        ? format.handicapAllowance.percent
-        : null;
+    const designated: string[] = format?.designatedCourses?.length
+      ? format.designatedCourses
+      : t.placeId
+        ? Array.from({ length: rounds }, () => t.placeId as string)
+        : [];
+
+    // FLIGHTS — assigned + frozen HERE, as the entry schema always promised.
+    // Bands come from the tour stop when one exists; otherwise a field of 8+
+    // with a flighted format splits into even bands by frozen combined index.
+    let bands: { name: string; min: number; max: number }[] | null = null;
+    const stop = (await db.doc(`tourStops/${tournamentId}`).get()).data() as
+      | { flights?: [number, number][] }
+      | undefined;
+    if (stop?.flights?.length) {
+      bands = stop.flights.map(([min, max], i) => ({
+        name: String.fromCharCode(65 + i),
+        min,
+        max,
+      }));
+    } else if (format?.flightBy && format.flightBy !== 'none' && entries.length >= 8) {
+      const n = entries.length >= 18 ? 3 : 2;
+      const per = Math.ceil(entries.length / n);
+      bands = Array.from({ length: n }, (_, i) => {
+        const slice = entries.slice(i * per, (i + 1) * per); // sorted by index above
+        return {
+          name: String.fromCharCode(65 + i),
+          min: i === 0 ? -20 : slice[0]?.combinedIndex ?? 99,
+          max: i === n - 1 ? 99 : slice[slice.length - 1]?.combinedIndex ?? 99,
+        };
+      });
+    }
+    if (bands) {
+      const fBatch = db.batch();
+      for (const e of entries) {
+        const band =
+          bands.find((b) => e.combinedIndex >= b.min && e.combinedIndex <= b.max) ??
+          bands[bands.length - 1];
+        e.flight = band.name;
+        fBatch.update(db.doc(`entries/${e.id}`), { flight: band.name });
+      }
+      await fBatch.commit();
+    }
+
     await createScorecards(
       tournamentId,
-      entries.map((e) => ({ id: e.id, userIds: e.userIds, combinedIndex: e.combinedIndex })),
+      entries.map((e) => ({
+        id: e.id,
+        userIds: e.userIds,
+        combinedIndex: e.combinedIndex,
+        indexes: e.indexes,
+      })),
       rounds,
-      format?.designatedCourses ?? [],
-      allowancePercent,
+      designated,
+      format?.handicapAllowance ?? null,
+      t.roundDeadlineDays ?? 7,
     );
   }
 

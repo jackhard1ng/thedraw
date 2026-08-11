@@ -496,6 +496,47 @@ async function main() {
   const gsc = (await db.doc('scorecards/grossRules1_g1_1').get()).data();
   check('gross format: no strokes even at a rated course', gsc.courseHandicap === null);
 
+  // ================= FLOW G2 — scramble 35/15 + scratch + DNF ===============
+  console.log('\nFLOW G2 — team allowance (35/15), explicit scratch, DNF sweep');
+  // 14+19 pair at netCourse (slope 130, rating 72.5, par 71):
+  //   CH_low  = 14×130/113 + 1.5 = 17.606
+  //   CH_high = 19×130/113 + 1.5 = 23.358
+  //   0.35×17.606 + 0.15×23.358 = 9.67 → 10 strokes. The per-player indexes
+  // matter: a "combined 33" made of 5+28 would get a DIFFERENT number.
+  await createScorecards(
+    'scr1',
+    [{ id: 's1', userIds: ['p2', 'p3'], combinedIndex: 33, indexes: [14, 19] }],
+    1, ['netCourse'], { type: 'scramble2', low: 0.35, high: 0.15 },
+  );
+  const scr = (await db.doc('scorecards/scr1_s1_1').get()).data();
+  check('scramble2: 14+19 team plays off 10 (35/15 of real CHs)', scr.courseHandicap === 10, scr.courseHandicap);
+
+  await createScorecards(
+    'scr2',
+    [{ id: 's2', userIds: ['p1', 'p4'], combinedIndex: 11.3, indexes: [4.2, 7.1] }],
+    1, ['netCourse'], { type: 'scramble2', low: 0.35, high: 0.15 },
+  );
+  const scr2 = (await db.doc('scorecards/scr2_s2_1').get()).data();
+  check('scramble2: 4.2+7.1 team plays off 4 — a real 6-stroke equalizer', scr2.courseHandicap === 4, scr2.courseHandicap);
+
+  // Explicit scratch ({type:'none'}) → no strokes even at a rated course.
+  await createScorecards('scr3', [{ id: 's3', userIds: ['p1'], combinedIndex: 7.1, indexes: [7.1] }], 1, ['netCourse'], { type: 'none' });
+  const scr3 = (await db.doc('scorecards/scr3_s3_1').get()).data();
+  check('explicit scratch spec: courseHandicap null', scr3.courseHandicap === null);
+
+  // DNF sweep: a card past dueAt closes as dnf instead of freezing completion.
+  const { dnfSweep } = require(path + '/lib/scheduled.js');
+  await db.doc('scorecards/dnfT_e9_1').set({
+    tournamentId: 'dnfT', entryId: 'e9', userId: 'p3', round: 1, placeId: '',
+    gross: 0, courseHandicap: null, net: null, holes: null, submittedBy: null,
+    confirmedBy: null, confirmDeadline: null,
+    dueAt: Timestamp.fromMillis(Date.now() - 1000),
+    scorecardPhotoUrl: null, status: 'awaitingResult',
+  });
+  await dnfSweep(Date.now());
+  const dnfCard = (await db.doc('scorecards/dnfT_e9_1').get()).data();
+  check('overdue card closes as DNF (no frozen seasons)', dnfCard.status === 'dnf', dnfCard.status);
+
   // ================= FLOW H — course data entry + promotion ==================
   console.log('\nFLOW H — course data entry (listed → supported)');
   await db.doc('courses/promoteMe').set({

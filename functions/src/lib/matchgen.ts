@@ -138,32 +138,77 @@ export async function createPodMatches(tid: string, pods: string[][]) {
 }
 
 /**
+ * Handicap allowance spec, straight off the format doc:
+ *   { percent }                       — flat % of the entry's (combined) index
+ *   { type:'scramble2', low, high }   — USGA-style 2-man scramble: low% of the
+ *                                       BETTER player's course handicap plus
+ *                                       high% of the other's. Computed from the
+ *                                       two REAL indexes — a 6+7 team and a
+ *                                       1+12 team both "add to 13" but are
+ *                                       nothing alike, so the sum is never used.
+ *   { type:'none' } / null            — gross, no strokes ever.
+ */
+export type AllowanceSpec =
+  | { percent: number }
+  | { type: 'scramble2'; low: number; high: number }
+  | { type: 'none' }
+  | null;
+
+function playingHandicap(
+  spec: AllowanceSpec,
+  entry: { combinedIndex: number; indexes?: number[] },
+  tee: { slope: number; rating: number; par: number },
+): number | null {
+  if (!spec || ('type' in spec && spec.type === 'none')) return null;
+  const ch = (index: number) => index * (tee.slope / 113) + (tee.rating - tee.par);
+  if ('percent' in spec) {
+    return Math.round(ch(entry.combinedIndex) * spec.percent);
+  }
+  if (spec.type === 'scramble2') {
+    // Legacy entries may lack per-player indexes; splitting the sum evenly is
+    // the least-wrong fallback (never silently gross).
+    const pair =
+      entry.indexes && entry.indexes.length === 2
+        ? [...entry.indexes].sort((a, b) => a - b)
+        : [entry.combinedIndex / 2, entry.combinedIndex / 2];
+    return Math.round(spec.low * ch(pair[0]) + spec.high * ch(pair[1]));
+  }
+  return null;
+}
+
+/**
  * Stroke-play scorecards: one per entry per round, awaiting the player's score.
  *
  * The stroke rule is FROZEN here, at draw time (§4): for a net-scored format,
- * each card gets a playing handicap computed from the entry's frozen index and
- * the DESIGNATED course's tee data —
+ * each card gets a playing handicap computed from the entry's frozen indexes
+ * and the DESIGNATED course's tee data (see AllowanceSpec above).
  *
- *   Course Handicap = Index × Slope/113 + (Rating − Par)
- *   Playing Handicap = round(Course Handicap × allowance)   (e.g. 95%)
+ * A gross format (allowance null/'none') freezes courseHandicap at null — no
+ * strokes, ever, and the UI states it. Net requires a supported course with
+ * tee data; a listed course leaves courseHandicap null, gross-only.
  *
- * A gross format (allowance null) freezes courseHandicap at null — no strokes,
- * ever, and the UI states it. Net requires a supported course with tee data;
- * a listed course leaves courseHandicap null and that card scores gross-only.
+ * `dueAt` arms the DNF sweep (§P1): a card still awaiting its result after the
+ * round deadline is closed out by the scheduler so one absent player can never
+ * freeze an event's completion.
  */
 export async function createScorecards(
   tid: string,
-  entries: { id: string; userIds: string[]; combinedIndex: number }[],
+  entries: { id: string; userIds: string[]; combinedIndex: number; indexes?: number[] }[],
   rounds: number,
   designatedCourses: string[],
-  allowancePercent: number | null, // null = gross, no strokes
+  allowance: AllowanceSpec | number | null, // number = legacy flat percent
+  roundDeadlineDays = 7,
 ) {
+  const spec: AllowanceSpec =
+    typeof allowance === 'number' ? { percent: allowance } : allowance;
+  const scored = spec != null && !('type' in spec && spec.type === 'none');
+
   // Resolve tee data per designated course once.
   const teeByRound: ({ slope: number; rating: number; par: number } | null)[] = [];
   for (let r = 1; r <= rounds; r++) {
     const placeId = designatedCourses[r - 1];
     let tee: { slope: number; rating: number; par: number } | null = null;
-    if (placeId && allowancePercent != null) {
+    if (placeId && scored) {
       const course = (await db.doc(`courses/${placeId}`).get()).data() as
         | { tier: string; teeSets: { slope: number; rating: number; par: number }[] | null }
         | undefined;
@@ -178,12 +223,7 @@ export async function createScorecards(
   for (const e of entries) {
     for (let r = 1; r <= rounds; r++) {
       const tee = teeByRound[r - 1];
-      const courseHandicap =
-        tee && allowancePercent != null
-          ? Math.round(
-              (e.combinedIndex * (tee.slope / 113) + (tee.rating - tee.par)) * allowancePercent,
-            )
-          : null;
+      const courseHandicap = tee ? playingHandicap(spec, e, tee) : null;
       const id = `${tid}_${e.id}_${r}`;
       batch.set(db.doc(`scorecards/${id}`), {
         tournamentId: tid,
@@ -198,6 +238,7 @@ export async function createScorecards(
         submittedBy: null,
         confirmedBy: null,
         confirmDeadline: null,
+        dueAt: Timestamp.fromMillis(Date.now() + roundDeadlineDays * r * 86_400_000),
         scorecardPhotoUrl: null,
         status: 'awaitingResult',
       });

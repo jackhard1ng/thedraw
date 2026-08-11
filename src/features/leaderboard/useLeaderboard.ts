@@ -118,7 +118,11 @@ export function useLeaderboard(tournamentId: string): LeaderboardData {
       );
       return {
         entryId: e.id,
-        name: entryDisplay(e, users).name,
+        // Flight rides the name — "Vogel, M. · Flt B" — so a flighted field
+        // reads who you're actually competing against at a glance.
+        name:
+          entryDisplay(e, users).name +
+          ((e as { flight?: string | null }).flight ? ` · Flt ${(e as { flight?: string | null }).flight}` : ''),
         index: e.combinedIndex,
         rounds,
         courseHandicap: ch,

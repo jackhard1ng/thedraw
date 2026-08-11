@@ -24,6 +24,7 @@ interface EntryLite {
   combinedIndex: number;
   seed: number;
   status: string;
+  flight?: string | null; // assigned at close for flighted stroke play
 }
 
 async function entryName(e: EntryLite): Promise<string> {
@@ -304,12 +305,18 @@ async function completeStrokePlay(tournamentId: string, entries: EntryLite[], ro
   const cards = scSnap.docs.map((d) => d.data() as any);
   const expected = entries.filter((e) => e.status !== 'withdrawn').length * rounds;
   const complete = cards.filter((c) => c.status === 'complete');
-  if (complete.length < expected) return null; // still waiting on scorecards
+  // DNF cards (closed by the deadline sweep) count toward "everything is in" —
+  // one absent player must never freeze an event — but a DNF entry posts no
+  // total and takes no place.
+  const settled = complete.length + cards.filter((c) => c.status === 'dnf').length;
+  if (settled < expected) return null; // still waiting on scorecards
+  const dnfEntries = new Set(cards.filter((c) => c.status === 'dnf').map((c) => c.entryId));
 
   const grossByEntry = new Map<string, number>();
   const netByEntry = new Map<string, number>();
   let anyNet = false;
   for (const e of entries) {
+    if (dnfEntries.has(e.id)) continue;
     const mine = complete.filter((c) => c.entryId === e.id);
     if (mine.length === 0) continue;
     grossByEntry.set(e.id, mine.reduce((a, c) => a + c.gross, 0));
@@ -348,5 +355,23 @@ async function completeStrokePlay(tournamentId: string, entries: EntryLite[], ro
     for (const id of netGroups[0]) awards.push({ entryId: id, placement: 'flightWinner', flight: 'net', path: [] });
   }
 
-  return { standings: { gross: grossGroups, net: netGroups } as Standings, awards };
+  // FLIGHTS — each band competes among itself (the whole point of assigning
+  // them at close). Standings gain a `flight:X` division per band so a payout
+  // table can pay flights directly; the band's best (net where net exists,
+  // else gross) earns a flightWinner award — a 16 beats the 5s in HIS flight.
+  const standings: Standings = { gross: grossGroups, net: netGroups };
+  const flightNames = [...new Set(entries.map((e) => e.flight).filter(Boolean))] as string[];
+  for (const f of flightNames.sort()) {
+    const inFlight = new Set(entries.filter((e) => e.flight === f).map((e) => e.id));
+    const source = anyNet ? netByEntry : grossByEntry;
+    const scoped = new Map([...source].filter(([id]) => inFlight.has(id)));
+    if (scoped.size === 0) continue;
+    const ladder = toTieGroups(scoped);
+    standings[`flight:${f}`] = ladder;
+    for (const id of ladder[0]) {
+      awards.push({ entryId: id, placement: 'flightWinner', flight: `Flight ${f}`, path: [] });
+    }
+  }
+
+  return { standings, awards };
 }

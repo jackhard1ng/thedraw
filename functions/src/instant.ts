@@ -43,6 +43,7 @@ interface TemplateDoc {
   formatId: string;
   fieldSize: number; // maximum field
   fieldSizeMin?: number; // minimum to run; omitted = runs full or not at all
+  indexRange?: [number, number] | null; // tier-banded template (C/D-only etc.)
   entryFeeMinCents: number;
   entryFeeMaxCents: number;
   allowedPayoutShapes: string[];
@@ -97,20 +98,31 @@ export const createInstantEvent = onCall<{
     throw new HttpsError('invalid-argument', 'Pick a future tee time.');
   }
 
-  // High-stakes gate above the template threshold; standard paid gate otherwise.
-  // Below the threshold, an open GROSS format relaxes the index requirement —
+  // High-stakes gate above the template threshold — compared PER PLAYER, not
+  // per team entry: a $40-a-head scramble is a $40 event to each player, not
+  // an $80 one. Below it, an open GROSS format relaxes the index requirement —
   // the index decides nothing there, so no handicap record is needed to play.
   const format = (await db.doc(`formats/${tpl.formatId}`).get()).data() as
-    | { scoring: string; handicapAllowance: unknown }
+    | { scoring: string; handicapAllowance: { type?: string } | { percent?: number } | null; teamSize?: number }
     | undefined;
+  const scratchByDesign = (format?.handicapAllowance as { type?: string } | null)?.type === 'none';
   const indexLoadBearing =
-    format?.scoring === 'matchPlay' || format?.handicapAllowance != null;
-  const eligibility =
-    entryFeeCents > tpl.requiresGhinAboveCents
+    (tpl.indexRange ?? null) != null ||
+    (!scratchByDesign &&
+      (format?.scoring === 'matchPlay' || format?.handicapAllowance != null));
+  const perPlayerFeeCents = Math.round(
+    entryFeeCents / Math.max(1, format?.teamSize ?? 1),
+  );
+  const eligibility = {
+    ...(perPlayerFeeCents > tpl.requiresGhinAboveCents
       ? HIGH_STAKES_ELIGIBILITY
       : entryFeeCents > 0
         ? { ...DEFAULT_PAID_ELIGIBILITY, ...(indexLoadBearing ? {} : { requiresVerifiedIndex: false }) }
-        : FREE_ELIGIBILITY;
+        : FREE_ELIGIBILITY),
+    // Tier-banded templates ("C/D only") carry their band into eligibility —
+    // enforced at entry, displayed on the event page.
+    ...(tpl.indexRange ? { indexRange: tpl.indexRange } : {}),
+  };
 
   // Registration closes shortly before the round so authorize/capture works the
   // same as any tournament (capture at close, void under minimum).
