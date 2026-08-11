@@ -26,7 +26,13 @@ export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
 }
 
 /** The slim draw-sheet masthead shown at the top of every signed-in page. */
-export function Masthead({ marketName }: { marketName: string }) {
+export function Masthead({
+  marketName,
+  right,
+}: {
+  marketName: string;
+  right?: React.ReactNode;
+}) {
   return (
     <header className="sticky top-0 z-20 border-b border-rule bg-paper/95 backdrop-blur">
       <div className="mx-auto flex max-w-sheet items-center justify-between px-4 py-2.5">
@@ -36,9 +42,12 @@ export function Masthead({ marketName }: { marketName: string }) {
             The Draw
           </span>
         </div>
-        <span className="font-display uppercase tracking-widest text-xs text-ink-faint">
-          {marketName}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-display uppercase tracking-widest text-xs text-ink-faint">
+            {marketName}
+          </span>
+          {right}
+        </div>
       </div>
     </header>
   );

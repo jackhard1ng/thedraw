@@ -12,6 +12,7 @@ import { usePost } from './useRoundPosts';
 import { attestRound, confirmTeeTime, joinRound, leaveRound } from '@/lib/callable';
 import type { Round } from '@/types/models';
 import { PlacesAutocomplete, type CoursePick } from '@/features/courses/PlacesAutocomplete';
+import { PushNudge } from '@/features/notifications/PushNudge';
 import { ChatThread } from '@/features/chat/ChatThread';
 import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
 import { Badge, Button, Card, Num, Rule, Spinner } from '@/components/ui';
@@ -306,6 +307,10 @@ export function PostDetailPage() {
             inGroup={isJoined || isOwner}
           />
         </div>
+      )}
+
+      {isJoined && post.status !== 'completed' && (
+        <PushNudge context="Turn on notifications for tee-time confirmations and group chat." />
       )}
 
       {(isJoined || isOwner) && post.status !== 'completed' && (

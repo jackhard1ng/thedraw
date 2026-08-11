@@ -171,6 +171,67 @@ function AlertPrefs({ userId, prefs }: { userId: string; prefs?: { newPostAlerts
 }
 
 /**
+ * Texts are the deadline-critical channel — a Google-sign-in user has no phone
+ * on file, so this row lets them add one (and anyone correct theirs).
+ */
+function PhoneRow({ userId, phone }: { userId: string; phone: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!editing) {
+    return (
+      <div className="flex items-center justify-between py-2 text-sm">
+        <span className="text-ink">
+          Text alerts
+          <span className="block text-xs text-ink-faint">
+            {phone
+              ? `Deadline-critical texts go to ${phone}.`
+              : 'No number on file — you won’t get deadline texts, only inbox and push.'}
+          </span>
+        </span>
+        <Button variant="ghost" className="px-3 py-1.5 text-xs" onClick={() => { setValue(phone); setEditing(true); }}>
+          {phone ? 'Change' : 'Add number'}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="py-2">
+      <input
+        className="field-input tnum"
+        inputMode="tel"
+        autoComplete="tel"
+        placeholder="816-555-0123"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <div className="mt-2 flex gap-2">
+        <Button
+          variant="primary"
+          className="px-3 py-1.5 text-xs"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const { normalizePhone } = await import('@/features/onboarding/Onboarding');
+              await updateDoc(doc(db, 'users', userId), { phone: normalizePhone(value) });
+              setEditing(false);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Save
+        </Button>
+        <Button variant="ghost" className="px-3 py-1.5 text-xs" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Where they'll play. The metro is wide — downtown and Blue Springs shouldn't
  * get drawn together unless someone said "anywhere". Empty selection = anywhere
  * (the friendly default: never blocks a match).
@@ -352,6 +413,7 @@ export function ProfilePage() {
       <div className="mt-6">
         <SectionHeader>Alerts</SectionHeader>
         <PushButton />
+        <PhoneRow userId={fbUser.uid} phone={profile.phone} />
         <AlertPrefs userId={fbUser.uid} prefs={profile.alertPrefs} />
       </div>
 

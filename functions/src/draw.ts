@@ -100,7 +100,18 @@ export async function drawSweep(now: number) {
     .where('status', '==', 'open')
     .where('expiresAt', '<=', Timestamp.fromMillis(now))
     .get();
-  await Promise.all(stale.docs.map((d) => d.ref.update({ status: 'expired' })));
+  for (const d of stale.docs) {
+    await d.ref.update({ status: 'expired' });
+    // Silence is a product killer — tell them the entry lapsed and invite a
+    // re-entry rather than letting the button quietly reset (§P1).
+    const r = d.data() as { userId: string; day: string };
+    await notify({
+      userId: r.userId,
+      title: 'Draw entry expired',
+      body: `Nobody matched for ${r.day} this week — it happens early on. Tap to re-enter; new players join daily.`,
+      link: '/',
+    });
+  }
 
   const openSnap = await db.collection('playRequests').where('status', '==', 'open').get();
   const open = openSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Req, 'id'>) }));

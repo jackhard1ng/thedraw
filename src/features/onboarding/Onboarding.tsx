@@ -13,12 +13,23 @@ import { useAuth } from '@/context/AuthContext';
 import { Button, Field, SectionHeader } from '@/components/ui';
 import type { HandicapSource } from '@/types/models';
 
+/** "816-555-0123" → "+18165550123"; already-E.164 input passes through. */
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/[^\d+]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('+')) return digits;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`;
+}
+
 export function Onboarding() {
   const { fbUser } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<'M' | 'F' | 'other'>('other');
   const [index, setIndex] = useState('');
+  const [phone, setPhone] = useState('');
   const [source, setSource] = useState<HandicapSource>('self');
   const [ghinNumber, setGhinNumber] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
@@ -44,7 +55,7 @@ export function Onboarding() {
         photoUrl: fbUser.photoURL ?? null,
         age: ageNum,
         gender,
-        phone: fbUser.phoneNumber ?? '',
+        phone: fbUser.phoneNumber ?? normalizePhone(phone),
         handicap: {
           index: indexNum,
           // A client may only ever self-declare; a green/yellow badge is granted
@@ -110,6 +121,22 @@ export function Onboarding() {
             />
           </Field>
         </div>
+
+        {!fbUser?.phoneNumber && (
+          <Field
+            label="Mobile number (recommended)"
+            hint="Deadline-critical alerts — a confirmed tee time, a match deadline — arrive by text. Without it you'll rely on the in-app inbox."
+          >
+            <input
+              className="field-input tnum"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="816-555-0123"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </Field>
+        )}
 
         <Field label="Gender">
           <div className="grid grid-cols-3 gap-2">

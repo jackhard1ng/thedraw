@@ -10,6 +10,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Card, Num } from '@/components/ui';
 import { enterDraw, leaveDraw } from '@/lib/callable';
+import { PushNudge } from '@/features/notifications/PushNudge';
 import { areaLabel } from '@/lib/areas';
 import type { PlayRequest } from '@/types/models';
 import { Link } from 'react-router-dom';
@@ -120,6 +121,15 @@ export function DrawCard() {
             ? `You're in ${day.slice(0, 3)}'s draw — tap to withdraw`
             : `Put me in ${day.slice(0, 3)}'s draw`}
       </Button>
+      {mine && (
+        <p className="mt-2 text-xs text-ink-faint">
+          The draw runs every hour as players enter. We'll notify you the moment
+          you're grouped; an entry that finds no group expires after 7 days.
+        </p>
+      )}
+      {mine && (
+        <PushNudge context="Turn on notifications so you know the moment you're drawn." />
+      )}
       {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
     </Card>
   );

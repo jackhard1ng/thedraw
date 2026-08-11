@@ -17,6 +17,8 @@ import { CreatePostPage } from '@/features/board/CreatePostPage';
 import { PostDetailPage } from '@/features/board/PostDetailPage';
 import { LogRoundPage } from '@/features/rounds/LogRoundPage';
 import { ProfilePage } from '@/features/profile/ProfilePage';
+import { InboxPage } from '@/features/notifications/InboxPage';
+import { Bell } from '@/features/notifications/Bell';
 import { featureRoutes } from '@/features/routes';
 
 function Shell() {
@@ -35,13 +37,18 @@ function Shell() {
 
   return (
     <div className="min-h-dvh pb-16">
-      <Masthead marketName={profile.marketId === 'kc' ? 'Kansas City' : profile.marketId.toUpperCase()} />
+      <Masthead
+        marketName={profile.marketId === 'kc' ? 'Kansas City' : profile.marketId.toUpperCase()}
+        right={<Bell />}
+      />
       <Routes>
         <Route path="/" element={<BoardPage />} />
         <Route path="/post/new" element={<CreatePostPage />} />
         <Route path="/post/:postId" element={<PostDetailPage />} />
         <Route path="/rounds/new" element={<LogRoundPage />} />
         <Route path="/me" element={<ProfilePage />} />
+        <Route path="/profile" element={<Navigate to="/me" replace />} />
+        <Route path="/inbox" element={<InboxPage />} />
         {/* Phase 2–5 feature routes (tournaments, matches, spectating,
             organizer, payments) — mounted from the feature manifest. */}
         {featureRoutes}
