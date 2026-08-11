@@ -150,7 +150,13 @@ export const unblockUser = onCall<{ blockedId: string }>(async (req) => {
 
 export const deleteAccount = onCall<Record<string, never>>(async (req) => {
   const uid = requireAuth(req.auth);
-  await getUser(uid); // ensure exists
+  const me = await getUser(uid); // ensure exists
+  // Deleting can't be an escape hatch from a ban/restriction — a sanctioned
+  // account stays sanctioned. (Reputation events are keyed to the uid and are
+  // deliberately NOT deleted below, so a forfeit history survives too.)
+  if (me.status === 'banned' || me.status === 'restricted') {
+    throw new HttpsError('failed-precondition', 'A restricted or banned account can’t be deleted. Contact an organizer.');
+  }
 
   const posts = await db.collection('roundPosts').where('createdBy', '==', uid).get();
   const rounds = await db.collection('rounds').where('userId', '==', uid).get();

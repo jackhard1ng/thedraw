@@ -326,6 +326,45 @@ async function completeStrokePlay(tournamentId: string, entries: EntryLite[], ro
     }
   }
 
+  // SANDBAGGING SIGNAL → organizer alert. A player who shoots dramatically
+  // better than their claimed index predicts (gross ≥ ~6 under par+index per
+  // round) is the tell; surface it to the market organizer as EVIDENCE (not an
+  // auto-verdict) so catching a hustler isn't 100% manual eyeballing. Uses the
+  // designated course's par when rated, else 72.
+  const t = (await db.doc(`tournaments/${tournamentId}`).get()).data() as
+    | { marketId: string; name: string; placeId?: string | null }
+    | undefined;
+  let par = 72;
+  const parCourseId = (t as { placeId?: string } | undefined)?.placeId;
+  if (parCourseId) {
+    const c = (await db.doc(`courses/${parCourseId}`).get()).data() as
+      | { teeSets?: { par: number }[] | null }
+      | undefined;
+    if (c?.teeSets?.length) par = c.teeSets[0].par;
+  }
+  for (const e of entries) {
+    const total = grossByEntry.get(e.id);
+    if (total == null) continue;
+    const perRound = total / rounds;
+    const expected = par + e.combinedIndex;
+    if (perRound <= expected - 6) {
+      const under = Math.round(expected - perRound);
+      for (const u of e.userIds) {
+        await db.collection('reports').add({
+          reportedBy: 'system',
+          targetType: 'user',
+          targetId: u,
+          marketId: t?.marketId ?? '',
+          reason: `Possible sandbagging: shot ~${under} strokes better than a ${e.combinedIndex.toFixed(1)} index predicts in ${t?.name ?? 'an event'}.`,
+          context: `avg gross ${perRound.toFixed(0)} vs expected ~${expected.toFixed(0)} (par ${par} + index). Review their history and consider a Tour Index.`,
+          createdAt: FieldValue.serverTimestamp(),
+          status: 'open',
+          system: true,
+        });
+      }
+    }
+  }
+
   // Group equal totals into tie groups (addendum §3: ties split the combined
   // prize for the tied places evenly).
   const toTieGroups = (byEntry: Map<string, number>): string[][] => {

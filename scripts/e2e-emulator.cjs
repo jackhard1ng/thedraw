@@ -627,6 +627,43 @@ async function main() {
   const niCard = (await db.doc('scorecards/netInstant1_ni1_1').get()).data();
   check('ratingless net: 21 index → 19 strokes (round(21×0.9))', niCard.courseHandicap === 19, niCard.courseHandicap);
 
+  // ================= FLOW L — sandbagger defenses ===========================
+  console.log('\nFLOW L — moat: no self-verify, GHIN required, Tour Index bites');
+  // Organizer cannot verify their own handicap.
+  let selfVerify = false;
+  try { await call(fns.verifyHandicap, 'org1', { userId: 'org1', source: 'ghin' }); }
+  catch { selfVerify = true; }
+  check('organizer cannot self-verify', selfVerify);
+  // Cannot stamp GHIN without a GHIN number on file.
+  await db.doc('users/nognhin').set({
+    marketId: 'kc', displayName: 'No Ghin', photoUrl: null, age: 30, gender: 'other',
+    handicap: { index: 14, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
+    role: 'member', organizerMarkets: [], canCreatePaidEvents: false, createdAt: Timestamp.now(), status: 'active', areas: [],
+  });
+  let ghinBlocked = false;
+  try { await call(fns.verifyHandicap, 'org1', { userId: 'nognhin', source: 'ghin' }); }
+  catch { ghinBlocked = true; }
+  check('cannot stamp GHIN-verified without a GHIN number', ghinBlocked);
+  // Tour Index overrides the self-declared index for strokes at entry.
+  await db.doc('users/sandbag').set({
+    marketId: 'kc', displayName: 'Sand Bagger', photoUrl: null, age: 30, gender: 'other',
+    handicap: { index: 14, source: 'self', ghinNumber: null, sourceUrl: null, verifiedAt: null, verifiedBy: null },
+    role: 'member', organizerMarkets: [], canCreatePaidEvents: false, createdAt: Timestamp.fromMillis(Date.now() - 60 * 86400000),
+    status: 'active', areas: [], tourIndex: 6, // committee correction downward
+  });
+  const tourT = 'tourIdxTest';
+  await db.doc(`tournaments/${tourT}`).set({
+    marketId: 'kc', formatId: 'grossFoursome', createdBy: 'org1', name: 'Tour Idx Test',
+    status: 'open', structure: 'singleRound', entryFeeCents: 0, prizeType: 'cashPurse',
+    divisionMode: 'grossOnly', doubleDipRule: 'onePrizePerPlayer', payoutTable: [],
+    minEntries: 1, maxEntries: 4, registrationOpens: Timestamp.now(),
+    registrationCloses: Timestamp.fromMillis(Date.now() + 3600000), eligibility: {},
+    roundDeadlineDays: 7, entryIds: [],
+  });
+  const sbEntry = await call(fns.enterTournament, 'sandbag', { tournamentId: tourT });
+  const sbEntryDoc = (await db.doc(`entries/${sbEntry.entryId}`).get()).data();
+  check('Tour Index (6) overrides self-declared 14 at entry', sbEntryDoc.combinedIndex === 6, sbEntryDoc.combinedIndex);
+
   // ================= FLOW K — flights: plus index → TOP flight ===============
   console.log('\nFLOW K — flight assignment puts a plus index in the top flight');
   const flightT = 'flightTest1';

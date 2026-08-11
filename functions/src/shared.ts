@@ -28,8 +28,10 @@ export interface UserDoc {
   handicap: {
     index: number;
     source: 'ghin' | 'thirdParty' | 'self';
+    ghinNumber?: string | null;
     verifiedAt: Timestamp | null;
   };
+  tourIndex?: number | null; // committee competition handicap (overrides at entry)
 }
 
 export async function getUser(uid: string): Promise<UserDoc> {

@@ -13,6 +13,18 @@ export const verifyHandicap = onCall<{ userId: string; source: 'ghin' | 'thirdPa
   const uid = requireAuth(req.auth);
   const target = await getUser(req.data.userId);
   await requireOrganizer(uid, target.marketId);
+  // An organizer may NOT verify their own handicap — self-verification is the
+  // cheapest sandbag (declare a soft 14, stamp it verified, farm net money).
+  if (req.data.userId === uid) {
+    throw new HttpsError('permission-denied', 'You can’t verify your own handicap — another organizer or an admin must.');
+  }
+  // Stamping "GHIN-verified" requires a GHIN number actually on file — the
+  // badge is meaningless (and the anti-sandbag gate defeated) if any click
+  // makes source 'ghin'. The organizer confirms the number against the public
+  // GHIN lookup out of band; this at least forces the number to exist.
+  if (req.data.source === 'ghin' && !target.handicap?.ghinNumber) {
+    throw new HttpsError('failed-precondition', 'This player has no GHIN number on file — they must add one before you can verify a GHIN source.');
+  }
   await db.doc(`users/${req.data.userId}`).update({
     'handicap.source': req.data.source,
     'handicap.verifiedAt': FieldValue.serverTimestamp(),

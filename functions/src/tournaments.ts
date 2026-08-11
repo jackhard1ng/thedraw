@@ -290,20 +290,27 @@ export const enterTournament = onCall(async (req) => {
   // Build the roster + frozen combined index. Display names are DENORMALIZED
   // here so public spectating pages (rules: entries are world-readable) never
   // need the auth-gated users collection, which carries phones and ages.
+  // The EFFECTIVE index for strokes/seeding is the committee Tour Index when
+  // an organizer has set one — that's the whole point of the tool: it corrects
+  // a sandbagger's soft self-declared number for every downstream calculation,
+  // not just the displayed badge.
+  const effIndex = (u: { tourIndex?: number | null; handicap: { index: number } }) =>
+    u.tourIndex != null ? u.tourIndex : u.handicap.index;
+
   const userIds = [uid];
   const displayNames = [user.displayName];
   // Per-player indexes frozen individually (§4) — team allowances like the
   // 35/15 scramble formula need WHO is the 6 and who is the 7, not their sum.
-  const indexes = [user.handicap.index];
-  let combinedIndex = user.handicap.index;
+  const indexes = [effIndex(user)];
+  let combinedIndex = effIndex(user);
   if (format.teamSize > 1) {
     if (!partnerId) throw new HttpsError('invalid-argument', 'This format needs a partner.');
     const partner = await getUser(partnerId);
     if (partner.status === 'banned') throw new HttpsError('failed-precondition', 'Partner is not eligible.');
     userIds.push(partnerId);
     displayNames.push(partner.displayName);
-    indexes.push(partner.handicap.index);
-    combinedIndex = user.handicap.index + partner.handicap.index; // frozen sum (§4)
+    indexes.push(effIndex(partner));
+    combinedIndex = effIndex(user) + effIndex(partner); // frozen sum (§4)
   }
 
   // one-per-phone / one entry per user
