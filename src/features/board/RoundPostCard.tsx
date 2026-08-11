@@ -5,6 +5,7 @@
 import { Link } from 'react-router-dom';
 import { Badge, Card, Num } from '@/components/ui';
 import { formatTeeTime, relativeDays } from '@/lib/format';
+import { formatIndex } from '@/lib/handicap';
 import type { PostWithId } from './useRoundPosts';
 
 const VIBE_LABEL: Record<string, string> = {
@@ -71,7 +72,7 @@ export function RoundPostCard({ post }: { post: PostWithId }) {
               <>
                 {post.creatorName}
                 {post.creatorIndex != null && (
-                  <Num className="ml-1">({post.creatorIndex.toFixed(1)})</Num>
+                  <Num className="ml-1">({formatIndex(post.creatorIndex)})</Num>
                 )}
                 {' · '}
               </>

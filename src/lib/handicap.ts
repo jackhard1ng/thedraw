@@ -35,6 +35,24 @@ export function tierFor(index: number): Tier {
   return { key: t.key, label: t.label, range: t.range };
 }
 
+/**
+ * Golfers write a plus handicap as "+1.2" but it's stored NEGATIVE (a +1.2
+ * plays 1.2 strokes BETTER than scratch). Print it the way a golfer reads it:
+ * -1.2 → "+1.2", 0 → "0.0", 12.4 → "12.4". A bare "-1.2" reads as a bug and
+ * kills a scratch player's flex.
+ */
+export function formatIndex(index: number): string {
+  if (index < 0) return `+${Math.abs(index).toFixed(1)}`;
+  return index.toFixed(1);
+}
+
+/** Parse a typed handicap: "+1.2" → -1.2, "1.2" → 1.2, "-1.2" → -1.2. */
+export function parseIndex(raw: string): number {
+  const s = raw.trim();
+  if (s.startsWith('+')) return -Number(s.slice(1));
+  return Number(s);
+}
+
 /** Green under 30 days, amber 30-90, gray beyond (§5). */
 export function freshness(verifiedAt: Ts | null, now = Date.now()): Freshness {
   if (!verifiedAt) return 'expired';
@@ -128,6 +146,6 @@ export function indexLine(handicap: Handicap, tourIndex?: number | null): string
       : handicap.source === 'thirdParty'
         ? 'Linked'
         : 'Self';
-  const base = `Index ${handicap.index.toFixed(1)} (${src})`;
-  return tourIndex != null ? `${base} · Tour Index ${tourIndex}` : base;
+  const base = `Index ${formatIndex(handicap.index)} (${src})`;
+  return tourIndex != null ? `${base} · Tour Index ${formatIndex(tourIndex)}` : base;
 }

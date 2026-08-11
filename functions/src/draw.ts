@@ -253,7 +253,7 @@ async function createDrawGroup(group: Req[], now: number) {
   }
   await batch.commit();
 
-  const roster = group.map((r) => `${r.displayName} (${r.index.toFixed(1)})`).join(', ');
+  const roster = group.map((r) => `${r.displayName} (${r.index < 0 ? "+" + Math.abs(r.index).toFixed(1) : r.index.toFixed(1)})`).join(', ');
   for (const r of group) {
     const isBooker = r.userId === booker.userId;
     await notify({

@@ -12,6 +12,7 @@
  */
 import { Num, Spinner } from '@/components/ui';
 import type { LbRow } from '@/lib/leaderboard';
+import { formatIndex } from '@/lib/handicap';
 import { useLeaderboard, type BuiltInput } from './useLeaderboard';
 
 export function LbTable({
@@ -62,7 +63,7 @@ export function LbTable({
                   )}
                 </td>
                 <td className="py-1.5 pr-2 text-right align-top">
-                  <Num>{row.index.toFixed(1)}</Num>
+                  <Num>{formatIndex(row.index)}</Num>
                 </td>
                 {rn.map((r) => {
                   const diff = inp?.diffs[r - 1];

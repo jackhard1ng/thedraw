@@ -6,6 +6,7 @@
  * change the match.
  */
 import { useParams } from 'react-router-dom';
+import { formatIndex } from '@/lib/handicap';
 import { Badge, Card, Num, Rule, Spinner } from '@/components/ui';
 import { roundLabel } from '@/lib/education';
 import { formatTeeTime, relativeDays } from '@/lib/format';
@@ -37,7 +38,7 @@ function PlayerBlock({
     <div className={`flex-1 ${won ? 'text-tournament' : 'text-ink'}`}>
       <p className="font-display uppercase tracking-wide text-lg">{info.name}</p>
       <p className="mt-1 text-sm text-ink-faint">
-        Index <Num>{info.index.toFixed(1)}</Num>
+        Index <Num>{formatIndex(info.index)}</Num>
         {entry.flight ? ` · Flight ${entry.flight}` : ''}
       </p>
       {won && <Badge tone="tournament">Winner</Badge>}

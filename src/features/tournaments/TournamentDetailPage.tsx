@@ -27,6 +27,7 @@ import {
 } from '@/components/ui';
 import { formatCents, itemizeEntry } from '@/lib/money';
 import { relativeDays, formatTeeTime } from '@/lib/format';
+import { formatIndex } from '@/lib/handicap';
 import { GLOSSARY, strokesRule } from '@/lib/education';
 import {
   checkEligibility,
@@ -507,7 +508,7 @@ export function TournamentDetailPage() {
                       <Badge tone="neutral">Flt {(e as { flight?: string | null }).flight}</Badge>
                     )}
                   </span>
-                  <Num className="shrink-0 text-ink-faint">{e.combinedIndex.toFixed(1)}</Num>
+                  <Num className="shrink-0 text-ink-faint">{formatIndex(e.combinedIndex)}</Num>
                 </div>
               ))}
           </div>

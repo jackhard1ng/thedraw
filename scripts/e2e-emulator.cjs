@@ -627,6 +627,36 @@ async function main() {
   const niCard = (await db.doc('scorecards/netInstant1_ni1_1').get()).data();
   check('ratingless net: 21 index → 19 strokes (round(21×0.9))', niCard.courseHandicap === 19, niCard.courseHandicap);
 
+  // ================= FLOW K — flights: plus index → TOP flight ===============
+  console.log('\nFLOW K — flight assignment puts a plus index in the top flight');
+  const flightT = 'flightTest1';
+  await db.doc(`tournaments/${flightT}`).set({
+    marketId: 'kc', formatId: 'grossFoursome', createdBy: 'org1', name: 'Flight Test',
+    status: 'open', structure: 'singleRound', entryFeeCents: 0, prizeType: 'cashPurse',
+    divisionMode: 'grossOnly', doubleDipRule: 'onePrizePerPlayer', payoutTable: [],
+    minEntries: 8, maxEntries: 8, registrationOpens: Timestamp.now(),
+    registrationCloses: Timestamp.fromMillis(Date.now() + 3600000),
+    eligibility: {}, roundDeadlineDays: 7, entryIds: [],
+  });
+  // 8 entrants incl. a +2.0 (stored -2.0) plus indexes 6..24.
+  const flightIdx = [-2.0, 6, 9, 12, 15, 18, 21, 24];
+  const fEntries = [];
+  for (let i = 0; i < flightIdx.length; i++) {
+    const eid = `fe${i}`;
+    await db.doc(`entries/${eid}`).set({
+      tournamentId: flightT, userIds: [`fu${i}`], teamId: null, teamName: null,
+      captainId: `fu${i}`, combinedIndex: flightIdx[i], indexes: [flightIdx[i]],
+      flight: null, seed: 0, paymentIntentId: null, paymentStatus: 'captured', status: 'active',
+    });
+    await db.doc(`tournaments/${flightT}`).update({ entryIds: admin.firestore.FieldValue.arrayUnion(eid) });
+    fEntries.push(eid);
+  }
+  await call(fns.closeRegistration, 'org1', { tournamentId: flightT });
+  const plusEntry = (await db.doc('entries/fe0').get()).data(); // the -2.0
+  const worstEntry = (await db.doc('entries/fe7').get()).data(); // the 24
+  check('plus index (-2.0) lands in the TOP flight (A)', plusEntry.flight === 'A', plusEntry.flight);
+  check('the 24 lands in the bottom flight', worstEntry.flight !== 'A', worstEntry.flight);
+
   // ================= FLOW H — course data entry + promotion ==================
   console.log('\nFLOW H — course data entry (listed → supported)');
   await db.doc('courses/promoteMe').set({

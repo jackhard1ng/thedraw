@@ -11,6 +11,7 @@ import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db, DEFAULT_MARKET_ID } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Field, SectionHeader } from '@/components/ui';
+import { parseIndex } from '@/lib/handicap';
 import type { HandicapSource } from '@/types/models';
 
 /** "816-555-0123" → "+18165550123"; already-E.164 input passes through. */
@@ -37,12 +38,14 @@ export function Onboarding() {
   const [error, setError] = useState<string | null>(null);
 
   const ageNum = Number(age);
-  const indexNum = Number(index);
+  const indexNum = parseIndex(index); // "+1.2" → -1.2 (plus handicaps)
   const valid =
     displayName.trim().length >= 2 &&
     Number.isFinite(ageNum) &&
     ageNum >= 18 &&
-    Number.isFinite(indexNum);
+    Number.isFinite(indexNum) &&
+    indexNum >= -10 &&
+    indexNum <= 54;
 
   async function submit() {
     if (!fbUser || !valid) return;
@@ -118,10 +121,12 @@ export function Onboarding() {
               onChange={(e) => setAge(e.target.value)}
             />
           </Field>
-          <Field label="Handicap index">
+          <Field label="Handicap index" hint="Plus handicap? Type it with a + (e.g. +1.2).">
             <input
               className="field-input tnum"
-              inputMode="decimal"
+              // text (not decimal) so the + and − keys are available on mobile
+              type="text"
+              inputMode="text"
               placeholder="12.4"
               value={index}
               onChange={(e) => setIndex(e.target.value)}

@@ -664,9 +664,12 @@ export async function runClose(tournamentId: string) {
     if (bands) {
       const fBatch = db.batch();
       for (const e of entries) {
+        // Below every band's floor (a plus/scratch index under a stop's
+        // configured min) belongs in the TOP flight, not the bottom — the
+        // fallback must be the first band, never the last.
         const band =
           bands.find((b) => e.combinedIndex >= b.min && e.combinedIndex <= b.max) ??
-          bands[bands.length - 1];
+          (e.combinedIndex < bands[0].min ? bands[0] : bands[bands.length - 1]);
         e.flight = band.name;
         fBatch.update(db.doc(`entries/${e.id}`), { flight: band.name });
       }

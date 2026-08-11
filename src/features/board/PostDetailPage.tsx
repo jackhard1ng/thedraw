@@ -17,6 +17,7 @@ import { ChatThread } from '@/features/chat/ChatThread';
 import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
 import { Badge, Button, Card, Num, Rule, Spinner } from '@/components/ui';
 import { formatTeeTime, relativeDays } from '@/lib/format';
+import { formatIndex } from '@/lib/handicap';
 
 /**
  * After the tee time passes, the post completes and this section runs the
@@ -259,7 +260,7 @@ export function PostDetailPage() {
                   {post.creatorName}
                 </Link>
                 {post.creatorIndex != null && (
-                  <Num className="ml-1 text-ink-faint">({post.creatorIndex.toFixed(1)})</Num>
+                  <Num className="ml-1 text-ink-faint">({formatIndex(post.creatorIndex)})</Num>
                 )}
               </p>
             )}

@@ -15,9 +15,17 @@ import { areaLabel } from '@/lib/areas';
 import type { PlayRequest } from '@/types/models';
 import { Link } from 'react-router-dom';
 
+// All seven days — the server and matcher were always day-agnostic; showing
+// only the weekend excluded the biggest free-time cohort in golf (weekday
+// morning players). Weekend defaults first for the casual crowd.
 const DAYS: { key: string; label: string }[] = [
   { key: 'saturday', label: 'Sat' },
   { key: 'sunday', label: 'Sun' },
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
 ];
 
 export function DrawCard() {
@@ -87,13 +95,13 @@ export function DrawCard() {
         </Link>
       </p>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
         {DAYS.map((d) => (
           <button
             key={d.key}
             type="button"
             onClick={() => setDay(d.key)}
-            className={`rounded-full border px-3 py-1 text-xs font-display uppercase tracking-wide transition-colors ${
+            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-display uppercase tracking-wide transition-colors ${
               day === d.key
                 ? 'border-tournament bg-tournament text-paper'
                 : 'border-rule-strong text-ink-soft'
@@ -102,17 +110,17 @@ export function DrawCard() {
             {d.label}
           </button>
         ))}
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-soft">
-          <input
-            type="checkbox"
-            checked={willingToBook}
-            onChange={(e) => setWillingToBook(e.target.checked)}
-            disabled={!!mine}
-            className="h-4 w-4 accent-tournament"
-          />
-          I can book
-        </label>
       </div>
+      <label className="mt-2 flex items-center gap-1.5 text-xs text-ink-soft">
+        <input
+          type="checkbox"
+          checked={willingToBook}
+          onChange={(e) => setWillingToBook(e.target.checked)}
+          disabled={!!mine}
+          className="h-4 w-4 accent-tournament"
+        />
+        I can book the tee time
+      </label>
 
       <Button
         variant={mine ? 'ghost' : 'primary'}

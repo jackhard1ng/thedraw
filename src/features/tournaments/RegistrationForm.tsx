@@ -5,6 +5,7 @@
  * the full team entry; prizes pay each member their half individually.
  */
 import { useEffect, useRef, useState } from 'react';
+import { formatIndex } from '@/lib/handicap';
 import { Field, Num, Spinner } from '@/components/ui';
 import { searchPlayers } from '@/lib/callable';
 
@@ -72,7 +73,7 @@ export function RegistrationForm({
         {picked ? (
           <div className="flex items-center justify-between rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm">
             <span className="text-ink">
-              {picked.displayName} <Num className="text-ink-faint">({picked.index.toFixed(1)})</Num>
+              {picked.displayName} <Num className="text-ink-faint">({formatIndex(picked.index)})</Num>
               {picked.verified && <span className="ml-1 text-xs text-pine">verified</span>}
             </span>
             <button
@@ -111,7 +112,7 @@ export function RegistrationForm({
                     }}
                   >
                     <span className="text-ink">{h.displayName}</span>
-                    <Num className="text-ink-faint">{h.index.toFixed(1)}</Num>
+                    <Num className="text-ink-faint">{formatIndex(h.index)}</Num>
                   </button>
                 ))}
               </div>

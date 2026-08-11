@@ -14,6 +14,7 @@
 import { Link } from 'react-router-dom';
 import { Num, Spinner } from '@/components/ui';
 import { roundLabel } from '@/lib/education';
+import { formatIndex } from '@/lib/handicap';
 import {
   bracketSize,
   entriesRemainingAt,
@@ -55,7 +56,7 @@ function Competitor({
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="truncate text-sm">{info.name}</span>
         {Number.isFinite(info.index) && (
-          <Num className="shrink-0 text-xs text-ink-faint">{info.index.toFixed(1)}</Num>
+          <Num className="shrink-0 text-xs text-ink-faint">{formatIndex(info.index)}</Num>
         )}
       </span>
       {isWinner && margin && <Num className="shrink-0 text-xs text-tournament">{margin}</Num>}
