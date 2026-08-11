@@ -39,9 +39,15 @@ export function StrokePlayScoreCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // "My card" is the TEAM's card — matched by entry membership, not by the
+  // card's userId (which is just the captain). The partner submits too.
+  const myEntryId = useMemo(
+    () => (entries ?? []).find((e) => uid && e.userIds.includes(uid))?.id ?? null,
+    [entries, uid],
+  );
   const myCard = useMemo(
-    () => cards?.find((c) => c.userId === uid && c.round === rnd) ?? null,
-    [cards, uid, rnd],
+    () => cards?.find((c) => c.entryId === myEntryId && c.round === rnd) ?? null,
+    [cards, myEntryId, rnd],
   );
 
   const nameForEntry = (entryId: string) => {
@@ -49,13 +55,17 @@ export function StrokePlayScoreCard({
     return e?.teamName || (e as { displayNames?: string[] } | undefined)?.displayNames?.join(' / ') || 'A partner';
   };
 
-  // Partners' cards awaiting confirmation that I didn't submit.
+  // Cards awaiting confirmation from OTHER entries — never my own team's
+  // (the server would reject it; showing the button would just error).
   const toConfirm = useMemo(
     () =>
       (cards ?? []).filter(
-        (c) => c.status === 'awaitingConfirmation' && c.userId !== uid && c.submittedBy !== uid,
+        (c) =>
+          c.status === 'awaitingConfirmation' &&
+          c.entryId !== myEntryId &&
+          c.submittedBy !== uid,
       ),
-    [cards, uid],
+    [cards, uid, myEntryId],
   );
 
   async function submit() {

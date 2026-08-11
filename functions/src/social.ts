@@ -24,6 +24,43 @@ export const unfollowUser = onCall<{ targetId: string }>(async (req) => {
   return { ok: true };
 });
 
+/**
+ * Partner search — the missing half of team entry. Prefix-matches display
+ * names in the caller's market (both as-typed and capitalized), returning just
+ * what a picker needs: id, name, index, verified badge. Auth-gated like every
+ * users read; never returns contact data (none lives on the users doc).
+ */
+export const searchPlayers = onCall<{ query: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const user = await requireActive(uid);
+  const q = String(req.data.query ?? '').trim();
+  if (q.length < 2) return { results: [] };
+
+  const variants = [...new Set([q, q[0].toUpperCase() + q.slice(1), q.toLowerCase()])];
+  const seen = new Map<string, { uid: string; displayName: string; index: number; verified: boolean }>();
+  for (const v of variants) {
+    const snap = await db
+      .collection('users')
+      .where('marketId', '==', user.marketId)
+      .orderBy('displayName')
+      .startAt(v)
+      .endAt(v + '')
+      .limit(8)
+      .get();
+    for (const d of snap.docs) {
+      if (d.id === uid || seen.has(d.id)) continue;
+      const u = d.data() as { displayName: string; handicap: { index: number; verifiedAt: unknown } };
+      seen.set(d.id, {
+        uid: d.id,
+        displayName: u.displayName,
+        index: u.handicap.index,
+        verified: !!u.handicap.verifiedAt,
+      });
+    }
+  }
+  return { results: [...seen.values()].slice(0, 8) };
+});
+
 export const requestEvent = onCall<{
   formatId: string;
   proposedEntryCents: number;

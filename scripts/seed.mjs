@@ -216,6 +216,23 @@ const TEMPLATES = [
     requiresGhinAboveCents: 7500,
     active: true,
   },
+  {
+    // A real scramble TOURNAMENT (not a 2-team money match): 3–6 teams,
+    // 70/30 so second place isn't a donation, 35/15 strokes so the 14/19
+    // pair has a genuine chance against the 4/7 pair.
+    id: 'scrambleSix',
+    marketId: 'kc',
+    name: 'Scramble Sunday (up to 6 teams)',
+    formatId: 'twoManScramble',
+    fieldSize: 6, // team entries
+    fieldSizeMin: 3,
+    entryFeeMinCents: 4000,
+    entryFeeMaxCents: 16000,
+    allowedPayoutShapes: ['70_30', '60_30_10'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 7500,
+    active: true,
+  },
 ];
 TEMPLATES.push({
   id: 'twilightNine',

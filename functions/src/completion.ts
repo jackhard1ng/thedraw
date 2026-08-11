@@ -355,16 +355,17 @@ async function completeStrokePlay(tournamentId: string, entries: EntryLite[], ro
     for (const id of netGroups[0]) awards.push({ entryId: id, placement: 'flightWinner', flight: 'net', path: [] });
   }
 
-  // FLIGHTS — each band competes among itself (the whole point of assigning
-  // them at close). Standings gain a `flight:X` division per band so a payout
-  // table can pay flights directly; the band's best (net where net exists,
-  // else gross) earns a flightWinner award — a 16 beats the 5s in HIS flight.
+  // FLIGHTS — each band competes among itself, GROSS. The band IS the
+  // equalizer: a 14 against 12–16s needs no strokes, and handing them out
+  // anyway double-corrects (Jack's rule: not everyone should always get
+  // strokes — divisions first, strokes only in the dedicated net division).
+  // Standings gain a `flight:X` division per band so a payout table can pay
+  // flights directly; each band's low gross earns a flightWinner award.
   const standings: Standings = { gross: grossGroups, net: netGroups };
   const flightNames = [...new Set(entries.map((e) => e.flight).filter(Boolean))] as string[];
   for (const f of flightNames.sort()) {
     const inFlight = new Set(entries.filter((e) => e.flight === f).map((e) => e.id));
-    const source = anyNet ? netByEntry : grossByEntry;
-    const scoped = new Map([...source].filter(([id]) => inFlight.has(id)));
+    const scoped = new Map([...grossByEntry].filter(([id]) => inFlight.has(id)));
     if (scoped.size === 0) continue;
     const ladder = toTieGroups(scoped);
     standings[`flight:${f}`] = ladder;

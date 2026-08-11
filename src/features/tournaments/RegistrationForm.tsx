@@ -1,15 +1,23 @@
 /**
  * Registration inputs. For team formats (teamSize > 1 on the format doc) we
- * collect a partner and an optional team name before entering; for singles there
- * is nothing to collect and the form renders a single confirmation line. The
- * partner is identified by userId here — a partner picker/search is a later
- * refinement; the Cloud Function validates the partnership either way.
+ * collect a partner via NAME SEARCH — nobody knows a userId — plus an optional
+ * team name. The money reality is stated where it applies: the captain pays
+ * the full team entry; prizes pay each member their half individually.
  */
-import { Field } from '@/components/ui';
+import { useEffect, useRef, useState } from 'react';
+import { Field, Num, Spinner } from '@/components/ui';
+import { searchPlayers } from '@/lib/callable';
 
 export interface RegistrationValue {
   partnerId: string;
   teamName: string;
+}
+
+interface Hit {
+  uid: string;
+  displayName: string;
+  index: number;
+  verified: boolean;
 }
 
 export function RegistrationForm({
@@ -21,6 +29,32 @@ export function RegistrationForm({
   value: RegistrationValue;
   onChange: (v: RegistrationValue) => void;
 }) {
+  const [text, setText] = useState('');
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [picked, setPicked] = useState<Hit | null>(null);
+  const [searching, setSearching] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (picked || text.trim().length < 2) {
+      setHits([]);
+      return;
+    }
+    clearTimeout(timer.current);
+    setSearching(true);
+    timer.current = setTimeout(async () => {
+      try {
+        const res = await searchPlayers({ query: text.trim() });
+        setHits(res.data.results);
+      } catch {
+        setHits([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer.current);
+  }, [text, picked]);
+
   if (teamSize <= 1) {
     return (
       <p className="text-sm text-ink-soft">
@@ -33,14 +67,71 @@ export function RegistrationForm({
     <div className="space-y-4">
       <Field
         label="Partner"
-        hint="Your partner's user ID. They must also be eligible."
+        hint={picked ? undefined : 'Search by name — they need an account in your market.'}
       >
-        <input
-          className="field-input tnum"
-          placeholder="user id"
-          value={value.partnerId}
-          onChange={(e) => onChange({ ...value, partnerId: e.target.value.trim() })}
-        />
+        {picked ? (
+          <div className="flex items-center justify-between rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm">
+            <span className="text-ink">
+              {picked.displayName} <Num className="text-ink-faint">({picked.index.toFixed(1)})</Num>
+              {picked.verified && <span className="ml-1 text-xs text-pine">verified</span>}
+            </span>
+            <button
+              className="text-xs text-tournament underline"
+              onClick={() => {
+                setPicked(null);
+                onChange({ ...value, partnerId: '' });
+              }}
+            >
+              change
+            </button>
+          </div>
+        ) : (
+          <>
+            <input
+              className="field-input"
+              placeholder="Start typing their name…"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+            {searching && (
+              <div className="mt-2">
+                <Spinner />
+              </div>
+            )}
+            {hits.length > 0 && (
+              <div className="mt-1 divide-y divide-rule rounded-sm border border-rule-strong bg-paper-raised">
+                {hits.map((h) => (
+                  <button
+                    key={h.uid}
+                    type="button"
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-paper-sunken"
+                    onClick={() => {
+                      setPicked(h);
+                      onChange({ ...value, partnerId: h.uid });
+                    }}
+                  >
+                    <span className="text-ink">{h.displayName}</span>
+                    <Num className="text-ink-faint">{h.index.toFixed(1)}</Num>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!searching && text.trim().length >= 2 && hits.length === 0 && (
+              <p className="mt-1 text-xs text-ink-faint">
+                No match — they may need to sign up first, or paste their Player
+                ID (on their profile):
+              </p>
+            )}
+            {!searching && text.trim().length >= 2 && hits.length === 0 && (
+              <input
+                className="field-input tnum mt-1"
+                placeholder="Player ID"
+                value={value.partnerId}
+                onChange={(e) => onChange({ ...value, partnerId: e.target.value.trim() })}
+              />
+            )}
+          </>
+        )}
       </Field>
       <Field label="Team name" hint="Optional. Shown on the bracket and leaderboard.">
         <input
@@ -50,6 +141,10 @@ export function RegistrationForm({
           onChange={(e) => onChange({ ...value, teamName: e.target.value })}
         />
       </Field>
+      <p className="rounded-sm border border-rule bg-paper-sunken p-3 text-xs text-ink-soft">
+        You pay the full team entry on your card; if you win, the prize pays
+        each of you your share individually — no settling up afterward.
+      </p>
     </div>
   );
 }

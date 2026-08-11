@@ -297,6 +297,12 @@ export const requestEvent = httpsCallable<
   { requestId: string }
 >(functions, 'requestEvent');
 
+// ---- Partner search (team entry) -------------------------------------------
+export const searchPlayers = httpsCallable<
+  { query: string },
+  { results: { uid: string; displayName: string; index: number; verified: boolean }[] }
+>(functions, 'searchPlayers');
+
 // ---- Payments (no stored value, ever — §7) ---------------------------------
 // Connect Express onboarding so a winner receives payouts to their own account.
 export const createConnectOnboardingLink = httpsCallable<

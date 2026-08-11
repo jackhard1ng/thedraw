@@ -130,7 +130,9 @@ export function InstantEventPage() {
             <div className="flex items-center justify-between">
               <span className="font-display uppercase tracking-wide">{t.name}</span>
               <span className="text-xs text-ink-faint">
-                <Num>{t.fieldSize}</Num> players · {t.adminFeePercent}% fee
+                <Num>{t.fieldSize}</Num>{' '}
+                {t.formatId.toLowerCase().includes('scramble') ? 'teams' : 'players'}
+                {t.adminFeePercent > 0 ? <> · {t.adminFeePercent}% fee</> : <> · free</>}
               </span>
             </div>
             <p className="mt-1 text-xs text-ink-faint">

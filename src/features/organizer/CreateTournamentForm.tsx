@@ -37,7 +37,10 @@ export function CreateTournamentForm() {
   const [description, setDescription] = useState('');
   const [entryFee, setEntryFee] = useState('0');
   const [adminFeePercent, setAdminFeePercent] = useState(25);
-  const [divisionMode, setDivisionMode] = useState<DivisionMode>('grossOnly');
+  // The DEFAULT tournament shape is gross + net divisions (Jack's rule): the
+  // gross division crowns the best golf straight up — no strokes — while the
+  // net division gives everyone else a real chance. Gross-only is the opt-in.
+  const [divisionMode, setDivisionMode] = useState<DivisionMode>('both');
   const [doubleDipRule, setDoubleDipRule] = useState<DoubleDipRule>('onePrizePerPlayer');
   const [prizeType, setPrizeType] = useState<PrizeType>('cashPurse');
   const [structure, setStructure] = useState<TournamentStructure>('bracket');
@@ -47,8 +50,10 @@ export function CreateTournamentForm() {
   const [closes, setCloses] = useState('');
   const [roundDeadlineDays, setRoundDeadlineDays] = useState(7);
   const [rows, setRows] = useState<PayoutRow[]>([
-    { division: 'gross', place: 1, sharePercent: 60 },
-    { division: 'gross', place: 2, sharePercent: 40 },
+    { division: 'gross', place: 1, sharePercent: 35 },
+    { division: 'gross', place: 2, sharePercent: 15 },
+    { division: 'net', place: 1, sharePercent: 35 },
+    { division: 'net', place: 2, sharePercent: 15 },
   ]);
 
   const [busy, setBusy] = useState(false);

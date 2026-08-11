@@ -485,6 +485,14 @@ export function ProfilePage() {
           <p className="text-sm text-ink-faint">
             {profile.age} · {profile.marketId.toUpperCase()}
           </p>
+          {/* The Player ID a partner needs for team entry when search misses. */}
+          <button
+            className="mt-0.5 text-xs text-ink-faint underline underline-offset-2 hover:text-tournament"
+            onClick={() => navigator.clipboard?.writeText(fbUser.uid)}
+            title={fbUser.uid}
+          >
+            Player ID: {fbUser.uid.slice(0, 8)}… (tap to copy)
+          </button>
         </div>
       </div>
 

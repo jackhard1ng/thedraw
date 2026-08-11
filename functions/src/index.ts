@@ -53,7 +53,7 @@ export {
   reviewEventRequest,
 } from './organizer';
 
-export { followUser, unfollowUser, requestEvent } from './social';
+export { followUser, unfollowUser, requestEvent, searchPlayers } from './social';
 
 export { createInstantEvent } from './instant';
 
