@@ -96,8 +96,8 @@ export function Landing() {
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">
         {[
           ['Never sells out', 'A single course has a handful of Tuesday slots; the city has hundreds. We spread a league across them, so there’s always room and a fresh course each week.'],
-          ['Every format', 'Season-long leagues, weekend tournaments, scrambles, one-off matches. Host your own in a minute, or drop into one that’s already running.'],
-          ['Fair at every level', 'Handicapped formats, flights, and net divisions mean a 16 beats a 5 on the right day. You don’t have to be good — you have to show up.'],
+          ['Grab your buddy', 'Team up for a 2-man scramble and take on the field — the most fun you can have for $20. Or go solo in a league, a tournament, or a one-off match. Host one in a minute or drop into one that’s running.'],
+          ['Fair at every level', 'Handicapped formats, flights, and net divisions mean a 16-and-a-20 duo can beat the scratch pair on the right day. You don’t have to be good — you have to show up.'],
         ].map(([h, b]) => (
           <div key={h} className="flex gap-3">
             <span className="mt-0.5 font-display uppercase tracking-wide text-xs text-tournament">
