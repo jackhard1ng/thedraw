@@ -80,6 +80,9 @@ export function Landing() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6 py-10 text-center">
       <Mark className="mx-auto mb-4 h-14 w-14 text-ink" />
+      <p className="mb-3 font-display uppercase tracking-[0.18em] text-xs text-tournament">
+        Real games · real stakes · any handicap
+      </p>
       <h1 className="text-4xl leading-tight">
         The league that
         <br />
