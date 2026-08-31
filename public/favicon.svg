@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" rx="16" fill="#F4F6FA"/>
+  <!-- The bracket-D: a D drawn as a tournament bracket, white ball in the champion slot. -->
+  <g stroke="#0A46C2" stroke-width="9" stroke-linecap="square" fill="none" transform="translate(2,0)">
+    <path d="M24 14 V86"/>
+    <path d="M24 14 H50 Q74 14 76 38"/>
+    <path d="M24 86 H50 Q74 86 76 62"/>
+    <path d="M24 36 H44"/>
+    <path d="M24 64 H44"/>
+    <path d="M44 36 V50 H58"/>
+    <path d="M44 64 V50"/>
+  </g>
+  <circle cx="78" cy="50" r="12" fill="#FFFFFF" stroke="#0A46C2" stroke-width="5"/>
+</svg>

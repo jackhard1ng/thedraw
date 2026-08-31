@@ -1,0 +1,233 @@
+rules_version = '2';
+
+// Firestore security rules — spec §5 "Firestore security rules".
+//
+// The rule of thumb: client code works identically whether these rules are
+// tight or wide open, so this file is the ONLY thing standing between the
+// data model and a bad actor. Be explicit and restrictive.
+//
+//   Clients may READ  market-scoped public data.
+//   Clients may WRITE only: their own users doc, their own roundPosts,
+//                           their own rounds, chat messages, their own reports/blocks.
+//   Clients may NEVER write: tournaments, entries, matches, ledger,
+//                            reputationEvents, courses, markets, awards, teams.
+//   Everything above is Cloud Functions only (which use the Admin SDK and
+//   bypass these rules by design).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // A signed-in, non-banned user. Role is read from their users doc.
+    function actor() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isSignedIn() && actor().status != 'banned';
+    }
+
+    // ---- markets: read-only to clients; written by admin via Cloud Functions ----
+    match /markets/{marketId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ---- users: a user may create and edit ONLY their own document ----
+    // Sensitive, function-owned fields are frozen against client writes even
+    // on one's own doc (role, flags, verification, status).
+    //
+    // PRIVACY: the users doc is readable by any signed-in member (names,
+    // handicaps and reliability are the trust product) — so PII must not live
+    // on it. Phone numbers, push tokens, and Stripe ids live in the private
+    // subdocument below, readable by the owner only.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      // users/{uid}/private/data — contact + billing. The owner may read it,
+      // and may write ONLY contact fields (phone, fcmTokens); Stripe ids and
+      // onboarding state are written by Cloud Functions alone.
+      match /private/{docId} {
+        allow read: if isSelf(userId);
+        allow create: if isSelf(userId)
+          && request.resource.data.keys().hasOnly(['phone', 'fcmTokens', 'age']);
+        allow update: if isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'fcmTokens', 'age']);
+        allow delete: if false;
+      }
+      allow create: if isSelf(userId)
+        && request.resource.data.role == 'member'
+        && request.resource.data.status == 'active'
+        && request.resource.data.canCreatePaidEvents == false
+        // Verification is granted by an organizer via a Cloud Function, never
+        // self-asserted at signup — a client may claim a source but not a badge.
+        && request.resource.data.handicap.verifiedAt == null
+        && request.resource.data.handicap.verifiedBy == null;
+      allow update: if isSelf(userId)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.canCreatePaidEvents == resource.data.canCreatePaidEvents
+        && request.resource.data.organizerMarkets == resource.data.organizerMarkets
+        // handicap.verifiedBy / verifiedAt are set by organizers via functions;
+        // a self-declared source is the only thing a client may set here.
+        && (request.resource.data.handicap.source == 'self'
+            || request.resource.data.handicap == resource.data.handicap);
+      allow delete: if false; // deletion is a Cloud Function (anonymize + retain ledger)
+    }
+
+    // ---- courses: read-only; a client may PROPOSE a listed course via a
+    //      separate courseSubmissions collection, never write courses directly ----
+    match /courses/{placeId} {
+      allow read: if true; // public — course pages and records are spectating
+      allow write: if false;
+    }
+    match /courseSubmissions/{subId} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.submittedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ---- roundPosts: a member owns their own posts; joins go through a
+    //      Cloud Function so slotsFilled and joinedUserIds stay authoritative ----
+    match /roundPosts/{postId} {
+      allow read: if true; // public — the live board is the landing page's proof
+
+      allow create: if isActive()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.slotsFilled == 0
+        && request.resource.data.status == 'open';
+      // Owner may edit descriptive fields or cancel; join/leave is function-only,
+      // so joinedUserIds and slotsFilled must be unchanged on a client update.
+      allow update: if isActive()
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.joinedUserIds == resource.data.joinedUserIds
+        && request.resource.data.slotsFilled == resource.data.slotsFilled;
+      allow delete: if false; // cancel by setting status, never hard-delete
+    }
+
+    // ---- chat: message per post/match/tournament thread ----
+    // Membership is REAL here, not cosmetic: threads/{threadId}.memberIds is
+    // maintained by Cloud Functions (join/leave, draw grouping, match
+    // creation, tournament entry), and only members can read or write a
+    // thread. Two players coordinating a match are not a public broadcast.
+    function isThreadMember(threadId) {
+      return isSignedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.memberIds;
+    }
+    match /threads/{threadId} {
+      allow read: if isThreadMember(threadId);
+      allow write: if false; // membership is function-maintained
+    }
+    match /threads/{threadId}/messages/{messageId} {
+      allow read: if isThreadMember(threadId);
+      allow create: if isActive()
+        && isThreadMember(threadId)
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 2000;
+      allow update, delete: if false; // append-only
+    }
+
+    // ---- rounds: self-reported casual rounds, owned by the user ----
+    match /rounds/{roundId} {
+      allow read: if isSignedIn();
+      allow create: if isActive()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.source == 'selfReported';
+      allow update, delete: if isSelf(resource.data.userId)
+        && resource.data.source == 'selfReported';
+    }
+
+    // ---- moderation: a user creates blocks and reports; only functions read/act ----
+    match /blocks/{blockId} {
+      // A block doc id is `${blockerId}_${blockedId}`.
+      allow read: if isActive() && resource.data.blockerId == request.auth.uid;
+      allow create: if isActive() && request.resource.data.blockerId == request.auth.uid;
+      allow delete: if isActive() && resource.data.blockerId == request.auth.uid;
+      allow update: if false;
+    }
+    function isOrganizerOf(marketId) {
+      return isSignedIn()
+        && (actor().role == 'admin'
+            || (actor().role == 'organizer' && marketId in actor().organizerMarkets));
+    }
+
+    match /reports/{reportId} {
+      allow create: if isActive() && request.resource.data.reportedBy == request.auth.uid;
+      // Organizers read their market's reports for the console; writes are
+      // function-only (status transitions happen in resolveDispute etc.).
+      allow read: if isOrganizerOf(resource.data.marketId);
+      allow update, delete: if false;
+    }
+
+    // ---- everything the spec marks Cloud-Function-only: never client-writable ----
+    // SPECTATING IS PUBLIC (§5 — shareable match pages, results feed, the
+    // intramural bulletin board). These collections are readable without auth:
+    // they carry competitive records and denormalized display names only —
+    // never phone numbers, ages, or contact data (users/ stays auth-gated).
+    match /tournaments/{id}        { allow read: if true; allow write: if false; }
+    match /entries/{id}            { allow read: if true; allow write: if false; }
+    match /matches/{id}            { allow read: if true; allow write: if false; }
+    match /scorecards/{id}         { allow read: if true; allow write: if false; }
+    match /teams/{id}              { allow read: if true; allow write: if false; }
+    match /awards/{id}             { allow read: if true; allow write: if false; }
+    match /formats/{id}            { allow read: if true; allow write: if false; }
+    match /eventTemplates/{id}     { allow read: if isSignedIn(); allow write: if false; }
+    match /tourStops/{id}          { allow read: if true; allow write: if false; }
+    match /tourSeries/{id}         { allow read: if true; allow write: if false; }
+    match /ledger/{id}             { allow read: if false;        allow write: if false; }
+    match /reputationEvents/{id}   { allow read: if isSignedIn(); allow write: if false; }
+
+    // Spectating: a client reads its own follow doc to know follow-state; the
+    // write goes through a Cloud Function. Public match/results reads use the
+    // tournaments/matches/entries reads above.
+    match /follows/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // In-app notifications: a user reads and marks-read their own.
+    match /notifications/{id} {
+      allow read: if isSelf(resource.data.userId);
+      allow update: if isSelf(resource.data.userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+
+    // Tour Index history is written by organizers via a function; readable so a
+    // player can see why their competition handicap changed.
+    match /users/{userId}/tourIndexLog/{logId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    // Enter-the-Draw requests: created/withdrawn via callables; a user reads
+    // their own, and open-count aggregation is read via the same rule.
+    match /playRequests/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /eventRequests/{id} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.requestedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Handicap verification requests — the member-facing path to the green
+    // badge. A member files their own; the market organizer works the queue;
+    // resolution happens in the verifyHandicap function.
+    match /verificationRequests/{id} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid
+            || isOrganizerOf(resource.data.marketId));
+      allow create: if isActive() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

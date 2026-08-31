@@ -1,0 +1,669 @@
+/**
+ * Tournament detail — the registration page. Everything a player needs to make
+ * an informed decision is shown BEFORE any payment (spec §5/§7):
+ *   - the format + scoring in plain language, glossary terms tappable inline,
+ *   - the FULL payout grid by division/place (with a sum-to-100 guard),
+ *   - the itemized entry fee, verbatim: "$X entry — $Y prize fund, $Z admin",
+ *   - eligibility, with the ineligibility reasons listed word-for-word.
+ *
+ * Reads come straight from Firestore; the entry itself goes through the
+ * enterTournament callable, which is the authoritative eligibility + money gate.
+ * The client eligibility check here is a courtesy that greys out the button.
+ */
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
+import {
+  Badge,
+  Button,
+  Card,
+  Num,
+  Rule,
+  SectionHeader,
+  Spinner,
+  Term,
+} from '@/components/ui';
+import { formatCents, itemizeEntry } from '@/lib/money';
+import { relativeDays, formatTeeTime } from '@/lib/format';
+import { formatIndex } from '@/lib/handicap';
+import { GLOSSARY, strokesRule } from '@/lib/education';
+import {
+  checkEligibility,
+  type DerivedStats,
+} from '@/lib/eligibility';
+import { confirmEntryPayment, enterTournament, withdrawEntry } from '@/lib/callable';
+import { PaymentSheet } from '@/features/payments/PaymentSheet';
+import type { Format, Scoring } from '@/types/models';
+import {
+  useFormat,
+  useTournament,
+  useTournamentEntries,
+  useTournamentMatches,
+} from './useTournaments';
+import { PayoutGrid } from './PayoutGrid';
+import { RegistrationForm, type RegistrationValue } from './RegistrationForm';
+import { ChatThread } from '@/features/chat/ChatThread';
+
+const DAY = 86_400_000;
+
+const SCORING_BLURB: Record<Scoring, string> = {
+  matchPlay: 'Played hole by hole against one opponent — win more holes than they do, not fewer total strokes. Ties on a hole are halved.',
+  strokePlay: 'Every stroke counts toward a total over the round; the lowest total wins. Hole everything out — no gimmes in stroke play, your score is against the whole field.',
+  stableford: 'Points per hole against a target, rewarding aggressive play — highest points wins.',
+  scramble: 'A team format: everyone hits, you play the best ball, and repeat until holed. Putt everything out — no gimmes outside match play.',
+};
+
+/** Format explanation with the load-bearing words made tappable (§5). */
+function FormatExplainer({
+  format,
+  indexRange,
+}: {
+  format: Format;
+  indexRange: [number, number] | null;
+}) {
+  const gross = format.scoring !== 'matchPlay' && !format.handicapAllowance;
+  return (
+    <div className="space-y-2 text-sm text-ink-soft">
+      <p>
+        <span className="font-display uppercase tracking-wide text-ink">
+          {format.name}
+        </span>{' '}
+        · {format.teamSize > 1 ? `${format.teamSize}-player teams` : 'singles'} ·{' '}
+        {format.advancement === 'bracket' ? (
+          <>single-elimination <Term word="bracket" def={GLOSSARY['match play']} /></>
+        ) : (
+          format.advancement
+        )}
+      </p>
+      <p>{SCORING_BLURB[format.scoring]}</p>
+
+      {/* The stroke rule, stated before anyone pays — never buried (§5). */}
+      <p
+        className={`rounded-md border p-2.5 ${
+          gross
+            ? 'border-tournament/30 bg-tournament/5 text-ink'
+            : 'border-rule bg-paper-sunken text-ink'
+        }`}
+      >
+        <span className="mr-1.5 font-display uppercase tracking-wide text-xs text-ink-soft">
+          {gross ? 'Gross' : 'Strokes'}
+        </span>
+        {strokesRule(format)}
+      </p>
+      {indexRange ? (
+        <p className="text-xs text-ink-soft">
+          Open to indexes{' '}
+          <span className="tnum">
+            {indexRange[0].toFixed(1)}–{indexRange[1] >= 40 ? 'up' : indexRange[1].toFixed(1)}
+          </span>{' '}
+          — enforced at entry, frozen when the draw is made.
+        </p>
+      ) : gross ? (
+        <p className="text-xs text-pine">
+          No handicap needed — open to anyone. Lowest score wins, straight up.
+        </p>
+      ) : null}
+      <p className="flex flex-wrap gap-x-3 gap-y-1">
+        {format.scoring === 'matchPlay' && (
+          <Term word="match play" def={GLOSSARY['match play']} />
+        )}
+        {format.scoring === 'strokePlay' && (
+          <Term word="stroke play" def={GLOSSARY['stroke play']} />
+        )}
+        {format.scoring === 'scramble' && (
+          <Term word="scramble" def={GLOSSARY.scramble} />
+        )}
+        {(format.scoringMode === 'net' || format.scoringMode === 'both') && (
+          <Term word="net" def={GLOSSARY.net} />
+        )}
+        {(format.scoringMode === 'gross' ||
+          format.scoringMode === 'both' ||
+          format.scoringMode == null) && (
+          <Term word="gross" def={GLOSSARY.gross} />
+        )}
+        {format.flightBy !== 'none' && (
+          <Term word="flight" def={GLOSSARY.flight} />
+        )}
+      </p>
+    </div>
+  );
+}
+
+export function TournamentDetailPage() {
+  const { id } = useParams();
+  const nav = useNavigate();
+  const { profile, fbUser } = useAuth();
+  const { tournament, loading } = useTournament(id);
+  const format = useFormat(tournament?.formatId);
+  const entries = useTournamentEntries(id);
+  const matches = useTournamentMatches(
+    tournament?.status === 'inProgress' ? id : undefined,
+  );
+
+  const [reg, setReg] = useState<RegistrationValue>({ partnerId: '', teamName: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A paid entry in progress: the server has reserved the slot and handed back
+  // a clientSecret; the card form below completes (or abandons) it.
+  const [pendingPayment, setPendingPayment] = useState<{
+    entryId: string;
+    clientSecret: string;
+    paymentMode: 'authorize' | 'setup';
+  } | null>(null);
+  const [justEntered, setJustEntered] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  // Best-effort derived stats for the courtesy eligibility check. The Cloud
+  // Function recomputes these authoritatively; here we approximate and lean
+  // permissive on anything we cannot compute client-side (spec note).
+  const [attestedRounds, setAttestedRounds] = useState<number | null>(null);
+  useEffect(() => {
+    const uid = fbUser?.uid;
+    if (!uid) return;
+    getDocs(
+      query(
+        collection(db, 'rounds'),
+        where('userId', '==', uid),
+        where('source', '==', 'attested'),
+      ),
+    )
+      .then((snap) => setAttestedRounds(snap.size))
+      .catch(() => setAttestedRounds(0));
+  }, [fbUser?.uid]);
+
+  if (loading || !tournament) {
+    return loading ? (
+      <Spinner />
+    ) : (
+      <div className="mx-auto max-w-sheet px-4 py-10 text-center text-ink-soft">
+        <p>This tournament could not be found.</p>
+        <Button variant="ghost" className="mt-4" onClick={() => nav('/tournaments')}>
+          Back to tournaments
+        </Button>
+      </div>
+    );
+  }
+
+  const uid = fbUser?.uid;
+  const myEntry = entries?.find((e) => uid && e.userIds.includes(uid) && e.status !== 'withdrawn');
+  const isCreator = !!uid && tournament.createdBy === uid;
+  const free = tournament.entryFeeCents === 0;
+  const item = itemizeEntry(tournament.entryFeeCents, tournament.adminFeePercent);
+  const field = tournament.entryIds?.length ?? 0;
+  const full = field >= tournament.maxEntries;
+  // Mirror the server's pool math exactly, INCLUDING the $10 event minimum —
+  // a projection bigger than the real payout is a broken promise.
+  const projectedN = Math.max(field, tournament.minEntries);
+  const projectedShortfall =
+    tournament.adminFeePercent > 0
+      ? Math.max(0, 1000 - item.adminCents * projectedN)
+      : 0;
+  const projectedPool = Math.max(0, item.prizeCents * projectedN - projectedShortfall);
+
+  // Derived stats — real where cheap, permissive otherwise (courtesy only).
+  const derived: DerivedStats | null = profile
+    ? {
+        // Count the user's non-withdrawn entries as a proxy for completed events.
+        eventsCompleted: (entries ?? []).filter(
+          (e) => uid && e.userIds.includes(uid) && e.status !== 'withdrawn',
+        ).length,
+        attestedRounds: attestedRounds ?? 0,
+        // Attendance can't be reconstructed client-side — pass a permissive 1.
+        attendanceRate: 1,
+        accountAgeDays: profile.createdAt
+          ? (Date.now() - profile.createdAt.toMillis()) / DAY
+          : 9999,
+        // Card details are collected inline at entry — never a blocker.
+        hasPaymentMethod: true,
+      }
+    : null;
+
+  const elig =
+    profile && derived
+      ? checkEligibility(profile, tournament, derived)
+      : { eligible: false, reasons: ['Sign in to check eligibility.'] };
+
+  const teamSize = format?.teamSize ?? 1;
+  const regValid = teamSize <= 1 || reg.partnerId.length > 0;
+
+  async function onEnter() {
+    if (!id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await enterTournament({
+        tournamentId: id,
+        ...(teamSize > 1
+          ? { partnerId: reg.partnerId, teamName: reg.teamName || undefined }
+          : {}),
+      });
+      if (res.data.clientSecret && res.data.paymentMode) {
+        setPendingPayment({
+          entryId: res.data.entryId,
+          clientSecret: res.data.clientSecret,
+          paymentMode: res.data.paymentMode,
+        });
+      } else {
+        setJustEntered(true); // free event — entered outright
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onWithdraw() {
+    if (!myEntry) return;
+    if (!window.confirm('Withdraw your entry?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await withdrawEntry({ entryId: myEntry.id });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-sheet px-4 py-6">
+      <button onClick={() => nav('/tournaments')} className="btn-quiet mb-4 px-0">
+        ← Tournaments
+      </button>
+
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl">{tournament.name}</h1>
+          <p className="mt-1 text-sm text-ink-faint">
+            <Num>{field}</Num>/<Num>{tournament.maxEntries}</Num> entered · min{' '}
+            <Num>{tournament.minEntries}</Num>
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {tournament.status === 'open' && (
+            <button
+              className="btn-quiet px-2 py-1 text-xs"
+              onClick={async () => {
+                const url = window.location.href;
+                const shareData = { title: tournament.name, text: `Join my game on The Draw: ${tournament.name}`, url };
+                try {
+                  if (navigator.share) await navigator.share(shareData);
+                  else {
+                    await navigator.clipboard.writeText(url);
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2000);
+                  }
+                } catch {
+                  /* user dismissed the share sheet */
+                }
+              }}
+            >
+              {shareCopied ? 'Link copied' : 'Share'}
+            </button>
+          )}
+          <Badge tone={tournament.status === 'open' ? 'fresh' : 'neutral'}>
+            {tournament.status}
+          </Badge>
+        </div>
+      </div>
+
+      {tournament.description && (
+        <p className="mt-3 whitespace-pre-wrap text-ink-soft">
+          {tournament.description}
+        </p>
+      )}
+
+      {(tournament.status === 'inProgress' || tournament.status === 'complete') && (
+        <div className="mt-4 flex gap-2">
+          {tournament.structure === 'bracket' ? (
+            <Button variant="ghost" className="flex-1" onClick={() => nav(`/tournaments/${tournament.id}/bracket`)}>
+              View bracket
+            </Button>
+          ) : (
+            <Button variant="ghost" className="flex-1" onClick={() => nav(`/tournaments/${tournament.id}/leaderboard`)}>
+              Leaderboard
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Enter your score — for a stroke-play event this is THE action after the
+          round, and the form lives on its own page nothing else linked to. */}
+      {myEntry &&
+        tournament.status === 'inProgress' &&
+        tournament.structure !== 'bracket' && (
+          <Button
+            variant="primary"
+            className="mt-4 w-full"
+            onClick={() => nav(`/tournaments/${tournament.id}/scorecard`)}
+          >
+            Enter your score
+          </Button>
+        )}
+
+      {/* The player's live match — the single most important link on this page.
+          Every deadline in the forfeit ladder counts down on the other side of it. */}
+      {myEntry &&
+        (() => {
+          const live = (matches ?? []).find(
+            (m) =>
+              m.entryIds.includes(myEntry.id) &&
+              ['scheduling', 'scheduled', 'awaitingConfirmation'].includes(m.status),
+          );
+          if (!live) return null;
+          const needsAction =
+            live.status === 'scheduling' || live.status === 'awaitingConfirmation';
+          return (
+            <button
+              onClick={() => nav(`/matches/${live.id}`)}
+              className={`mt-4 flex w-full items-center justify-between rounded-sm border p-3 text-left ${
+                needsAction ? 'border-tournament bg-tournament/5' : 'border-rule-strong bg-paper-raised'
+              }`}
+            >
+              <span>
+                <span className="font-display uppercase tracking-wide text-sm text-ink">
+                  Your match
+                </span>
+                <span className="block text-xs text-ink-soft">
+                  {live.status === 'scheduling'
+                    ? 'Needs scheduling — post your availability before the deadline.'
+                    : live.status === 'scheduled'
+                      ? 'Scheduled — details and chat inside.'
+                      : 'A result is waiting on confirmation.'}
+                </span>
+              </span>
+              <span className="text-tournament">→</span>
+            </button>
+          );
+        })()}
+
+      {/* Format + scoring, plain language */}
+      <div className="mt-6">
+        <SectionHeader>Format</SectionHeader>
+        {format ? (
+          <FormatExplainer format={format} indexRange={tournament.eligibility.indexRange} />
+        ) : (
+          <p className="text-sm text-ink-faint">Loading format…</p>
+        )}
+      </div>
+
+      {/* House rules — argued on the first tee exactly never, because they're
+          stated here, before anyone enters. */}
+      {tournament.rules && (
+        <div className="mt-6">
+          <SectionHeader>House rules</SectionHeader>
+          <Card className="p-4">
+            <p className="whitespace-pre-wrap text-sm text-ink-soft">{tournament.rules}</p>
+          </Card>
+        </div>
+      )}
+
+      {/* Payout grid */}
+      <div className="mt-6">
+        <SectionHeader
+          right={
+            <span className="text-xs text-ink-faint">
+              {tournament.prizeType === 'cashPurse' ? 'Cash purse' : 'Sponsored'}
+            </span>
+          }
+        >
+          Payouts
+        </SectionHeader>
+        <PayoutGrid
+          rows={tournament.payoutTable}
+          poolCents={free ? undefined : projectedPool}
+        />
+        {!free && (
+          <p className="mt-1 text-xs text-ink-faint">
+            Projected at the current field of <Num>{projectedN}</Num>.
+            Purses are a percentage of the prize fund and grow with the field.
+            Ties split the combined shares of the tied places evenly.
+          </p>
+        )}
+        {tournament.prizeType === 'sponsoredPrizes' && tournament.sponsoredPrizes && (
+          <div className="mt-2 divide-y divide-rule text-sm">
+            {tournament.sponsoredPrizes.map((p) => (
+              <div key={p.place} className="flex justify-between py-1.5">
+                <span className="text-ink">
+                  {p.place}. {p.description}
+                </span>
+                <span className="text-ink-faint">{p.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Entry fee itemization (§7) — skipped for free events */}
+      <div className="mt-6">
+        <SectionHeader>Entry fee</SectionHeader>
+        {free ? (
+          <p className="text-lg text-pine">Free event — no entry fee.</p>
+        ) : (
+          <Card className="p-4">
+            <p className="text-ink">
+              <Num className="text-lg">{item.line}</Num>
+            </p>
+            <Rule className="my-3" />
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Entry</span>
+                <Num>{formatCents(item.entryFeeCents)}</Num>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Prize fund</span>
+                <Num className="text-pine">{formatCents(item.prizeCents)}</Num>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-ink-soft">
+                  Tournament administration
+                  {item.adminCents < Math.round((item.entryFeeCents * tournament.adminFeePercent) / 100)
+                    ? ' (capped)'
+                    : ` (${tournament.adminFeePercent}%)`}
+                </span>
+                <Num>{formatCents(item.adminCents)}</Num>
+              </div>
+            </div>
+            {/* What the fee buys — shown at the moment of payment, so nobody
+                wonders. Capped at $20/entry: the fee prices the work, not the pot. */}
+            <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-faint">
+              The fee covers entry collection, the draw, scheduling and results
+              machinery, dispute arbitration, and automatic payout to winners.
+              It is capped at $20 per entry and never scales with the purse; on
+              very small fields a $10-per-event minimum applies, taken from the
+              pool before payouts.
+            </p>
+            <p className="mt-2 text-xs text-pine">
+              You're only charged if the event runs. Enter and your card is held
+              (or saved, for longer windows); if the field falls short at close,
+              nothing is collected.
+            </p>
+            <p className="mt-1 text-xs text-ink-faint">
+              Green fees are separate — you pay the course directly when you
+              play, unless the event says otherwise.
+            </p>
+          </Card>
+        )}
+      </div>
+
+      {/* The field — who you'd be playing against, BEFORE you enter. Names and
+          frozen indexes are public by design (denormalized on entries), and a
+          league is the same faces weekly: show them. */}
+      {(entries ?? []).filter((e) => e.status !== 'withdrawn').length > 0 && (
+        <div className="mt-6">
+          <SectionHeader>The field</SectionHeader>
+          <div className="divide-y divide-rule">
+            {(entries ?? [])
+              .filter((e) => e.status !== 'withdrawn')
+              .sort((a, b) => a.combinedIndex - b.combinedIndex)
+              .map((e) => (
+                <div key={e.id} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="min-w-0 truncate text-ink">
+                    {e.teamName || (e as { displayNames?: string[] }).displayNames?.join(' / ') || 'Entered player'}
+                    {(e as { flight?: string | null }).flight && (
+                      <Badge tone="neutral">Flt {(e as { flight?: string | null }).flight}</Badge>
+                    )}
+                  </span>
+                  <Num className="shrink-0 text-ink-faint">{formatIndex(e.combinedIndex)}</Num>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Registration window */}
+      <div className="mt-6">
+        <SectionHeader>Registration</SectionHeader>
+        <div className="space-y-1 text-sm text-ink-soft">
+          <div className="flex justify-between">
+            <span>Opens</span>
+            <span className="text-ink">{formatTeeTime(tournament.registrationOpens)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Closes</span>
+            <span className="text-ink">
+              {formatTeeTime(tournament.registrationCloses)} ·{' '}
+              {relativeDays(tournament.registrationCloses)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <Rule className="my-8" />
+
+      {/* Field chat — self-serve events organize their own tee times here.
+          Entered players AND the creator (who's a thread member from creation,
+          so they can organize before paying their own entry). */}
+      {(myEntry || isCreator) && (tournament.status === 'open' || tournament.status === 'inProgress') && (
+        <div className="mb-8">
+          <SectionHeader>Field chat</SectionHeader>
+          <p className="mb-2 text-xs text-ink-faint">
+            Everyone entered can post — organize tee times, pairings, and logistics here.
+          </p>
+          <Card className="p-4">
+            <ChatThread threadId={tournament.id} />
+          </Card>
+        </div>
+      )}
+
+      {/* Eligibility + enter */}
+      {pendingPayment ? (
+        <Card className="p-4">
+          <p className="mb-1 font-display uppercase tracking-wide text-sm text-ink">
+            {pendingPayment.paymentMode === 'authorize'
+              ? `Hold ${formatCents(tournament.entryFeeCents)} on your card`
+              : 'Save your card for this entry'}
+          </p>
+          <p className="mb-4 text-xs text-ink-faint">
+            {pendingPayment.paymentMode === 'authorize'
+              ? "Your card is held, not charged. It's only charged when registration closes and the event runs; if the field falls short, the hold is released in full."
+              : 'Registration closes more than 5 days out, so your card is saved now and charged only when the event runs. If the field falls short, nothing is charged.'}
+          </p>
+          <PaymentSheet
+            clientSecret={pendingPayment.clientSecret}
+            mode={pendingPayment.paymentMode}
+            submitLabel={
+              pendingPayment.paymentMode === 'authorize'
+                ? `Hold ${formatCents(tournament.entryFeeCents)}`
+                : 'Save card & enter'
+            }
+            onSuccess={async () => {
+              await confirmEntryPayment({ entryId: pendingPayment.entryId });
+              setPendingPayment(null);
+              setJustEntered(true);
+            }}
+            onCancel={async () => {
+              // Abandoning the card form abandons the entry — release the slot
+              // instead of leaving a pending entry to lapse at close.
+              try {
+                await withdrawEntry({ entryId: pendingPayment.entryId });
+              } catch {
+                /* close may have passed; the lapse sweep cleans up */
+              }
+              setPendingPayment(null);
+            }}
+          />
+        </Card>
+      ) : myEntry ? (
+        <div className="space-y-3">
+          <div className="rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm text-pine">
+            {myEntry.paymentStatus === 'pendingAuthorization' ? (
+              <>Your spot is reserved but payment was never completed — withdraw and re-enter to fix it.</>
+            ) : (
+              <>
+                You're in.{' '}
+                {myEntry.paymentStatus === 'authorized'
+                  ? 'Your card is held; it is charged only when the event runs.'
+                  : myEntry.paymentStatus === 'methodSaved'
+                    ? 'Your card is saved; it is charged only when the event runs.'
+                    : myEntry.paymentStatus === 'captured'
+                      ? 'Entry fee collected.'
+                      : ''}
+                {myEntry.seed ? (
+                  <>
+                    {' '}Seed <Num>{myEntry.seed}</Num>.
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+          {tournament.status === 'open' && (
+            <Button variant="ghost" className="w-full" disabled={busy} onClick={onWithdraw}>
+              {busy ? '…' : 'Withdraw entry'}
+            </Button>
+          )}
+        </div>
+      ) : justEntered ? (
+        <div className="rounded-sm border border-pine/40 bg-pine/10 p-4 text-sm text-pine">
+          <p className="font-display uppercase tracking-wide">You're in</p>
+          <p className="mt-1 text-ink-soft">
+            {free
+              ? 'You are entered.'
+              : "Payment complete — you're entered. Your card is only charged when the event runs."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {!elig.eligible && (
+            <div className="rounded-sm border border-tournament/30 bg-tournament/10 p-3">
+              <p className="font-display uppercase tracking-wide text-xs text-tournament">
+                Not eligible yet
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-soft">
+                {elig.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {teamSize > 1 && (
+            <RegistrationForm teamSize={teamSize} value={reg} onChange={setReg} />
+          )}
+
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={busy || full || !elig.eligible || !regValid || tournament.status !== 'open'}
+            onClick={onEnter}
+          >
+            {busy
+              ? 'Entering…'
+              : full
+                ? 'Field full'
+                : tournament.status !== 'open'
+                  ? 'Registration closed'
+                  : free
+                    ? 'Enter — free'
+                    : `Enter — ${formatCents(tournament.entryFeeCents)}`}
+          </Button>
+          {error && <p className="text-sm text-tournament">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
