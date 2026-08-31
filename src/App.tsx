@@ -28,6 +28,7 @@ import { TournamentLeaderboardPage } from '@/features/tournaments/TournamentLead
 import { PublicMatchPage } from '@/features/spectating/PublicMatchPage';
 import { ResultsFeed } from '@/features/spectating/ResultsFeed';
 import { OrderOfMerit } from '@/features/spectating/OrderOfMerit';
+import { legalRoutes, TermsPage, PrivacyPage, RefundsPage, SupportPage } from '@/features/legal';
 
 /**
  * Signed-out chrome for public spectating pages: masthead + a persistent
@@ -97,6 +98,12 @@ function Shell() {
         <Route path="/m/:id" element={<PublicShell><PublicMatchPage /></PublicShell>} />
         <Route path="/results" element={<PublicShell><ResultsFeed /></PublicShell>} />
         <Route path="/standings" element={<PublicShell><OrderOfMerit /></PublicShell>} />
+        {/* Legal + support must resolve signed-out — Stripe/app-store crawlers
+            and shared links reach them without an account. */}
+        <Route path="/terms" element={<PublicShell><TermsPage /></PublicShell>} />
+        <Route path="/privacy" element={<PublicShell><PrivacyPage /></PublicShell>} />
+        <Route path="/refunds" element={<PublicShell><RefundsPage /></PublicShell>} />
+        <Route path="/support" element={<PublicShell><SupportPage /></PublicShell>} />
         <Route path="*" element={<Landing />} />
       </Routes>
     );
@@ -122,6 +129,7 @@ function Shell() {
         {/* Phase 2–5 feature routes (tournaments, matches, spectating,
             organizer, payments) — mounted from the feature manifest. */}
         {featureRoutes}
+        {legalRoutes}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <BottomNav />

@@ -26,6 +26,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { deleteAccount } from '@/lib/callable';
 import { Badge, Button, Card, Num, Rule, SectionHeader, Spinner } from '@/components/ui';
+import { LegalFooter } from '@/features/legal';
 import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { areasFor } from '@/lib/areas';
 import { formatTeeTime } from '@/lib/format';
@@ -608,6 +609,10 @@ export function ProfilePage() {
         >
           Delete account
         </button>
+      </div>
+
+      <div className="mt-8">
+        <LegalFooter />
       </div>
     </div>
   );

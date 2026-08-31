@@ -14,6 +14,7 @@ import { db, DEFAULT_MARKET_ID, firebaseConfigured } from '@/lib/firebase';
 import { Button, Card, Num, Rule } from '@/components/ui';
 import { Mark } from '@/components/Mark';
 import { SignIn } from '@/features/auth/SignIn';
+import { LegalFooter } from '@/features/legal';
 import { formatTeeTime } from '@/lib/format';
 import type { RoundPost } from '@/types/models';
 
@@ -127,6 +128,9 @@ export function Landing() {
       <p className="text-xs text-ink-faint">
         Kansas City · free to join · 18+ · real names only
       </p>
+      <div className="mt-4">
+        <LegalFooter />
+      </div>
     </div>
   );
 }

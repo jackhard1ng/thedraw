@@ -124,6 +124,21 @@ Open the production URL in a fresh browser:
 
 If free events work end to end, Phase 1 is live. Money is the next gate.
 
+### 1g. Legal + support (required before money)
+
+The app ships in-app **Terms** (`/terms`), **Privacy** (`/privacy`), **Refunds**
+(`/refunds`), and **Support** (`/support`) pages, linked from the landing and
+profile footers. Two things you must do before taking a dollar:
+
+- [ ] **Point the support address somewhere you actually read.** It's set in
+      `src/features/legal/index.tsx` as `SUPPORT_EMAIL` (currently
+      `support@thedraw.app`). Set up that inbox (or change the constant to one
+      you own) — a real user with a payment problem reaches you here.
+- [ ] **Have a lawyer review the legal copy** and confirm the skill-based-contest
+      position for Missouri/Kansas. The text is honest, plain-English starter
+      copy that matches how the product actually behaves — it is not a substitute
+      for counsel. This is the §7 legal-opinion gate your README calls for.
+
 ---
 
 ## 2. Turn on money (Stripe live)
