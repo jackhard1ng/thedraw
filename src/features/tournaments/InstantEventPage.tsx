@@ -64,6 +64,17 @@ export function InstantEventPage() {
 
   // A free template (min = max = $0) needs no fee input at all.
   const isFreeTemplate = !!tpl && tpl.entryFeeMaxCents === 0;
+  // A 2-player template is a heads-up money match — tailor the copy.
+  const isHeadsUp = !!tpl && tpl.fieldSize === 2;
+  // Surface the on-ramps first: free, then the heads-up match, then by field.
+  const sortedTemplates =
+    templates &&
+    [...templates].sort((a, b) => {
+      const aFree = a.entryFeeMaxCents === 0 ? 0 : 1;
+      const bFree = b.entryFeeMaxCents === 0 ? 0 : 1;
+      if (aFree !== bFree) return aFree - bFree;
+      return a.fieldSize - b.fieldSize;
+    });
   let feeCents = 0;
   let feeError: string | null = null;
   if (tpl && fee && !isFreeTemplate) {
@@ -115,14 +126,16 @@ export function InstantEventPage() {
     <div className="mx-auto max-w-sheet px-4 py-6">
       <SectionHeader>Start a game</SectionHeader>
       <p className="mb-5 text-sm text-ink-soft">
-        Pick a template, set the details, and it's live — a real tournament with a
-        published purse and an itemized fee. You can play in it.
+        Pick a template, set the details, and it's live — a real game with a
+        published purse and an itemized fee. Challenge one person to a{' '}
+        <span className="text-ink">heads-up match</span>, or spin up a small
+        tournament. You can play in it.
       </p>
 
       {/* 1. Template */}
       <div className="space-y-2">
         {templates === null && <p className="text-sm text-ink-faint">Loading templates…</p>}
-        {templates?.map((t) => (
+        {sortedTemplates?.map((t) => (
           <Card
             key={t.id}
             onClick={() => {
@@ -191,6 +204,15 @@ export function InstantEventPage() {
             )}
           </div>
 
+          {isHeadsUp && (
+            <p className="rounded-sm border border-tournament/30 bg-tournament/5 p-3 text-xs text-ink-soft">
+              <span className="text-ink">Heads-up match.</span> You and one
+              opponent. It's net match play — the higher handicap gets strokes,
+              so a 4 and a 14 play an even game. Winner takes the pot; the only
+              cut is the platform fee.
+            </p>
+          )}
+
           {tpl.netCapable && (
             <p className="rounded-sm border border-pine/30 bg-pine/5 p-3 text-xs text-ink-soft">
               This game pays <span className="text-ink">two divisions</span> —
@@ -251,6 +273,17 @@ export function InstantEventPage() {
           )}
 
           {error && <p className="text-sm text-tournament">{error}</p>}
+
+          {!isFreeTemplate && (
+            <p className="rounded-sm border border-rule p-3 text-xs text-ink-faint">
+              <span className="text-ink">How the money works:</span> each player's
+              entry is <span className="text-ink">held on their card, not charged</span>.
+              It's captured only once the field locks and the game is on;{' '}
+              {isHeadsUp ? 'the winner takes the pot' : 'it pays out per the grid above'},
+              minus the platform fee. If it doesn't fill, every hold is released
+              and nobody pays. Green fees are always paid separately at the course.
+            </p>
+          )}
 
           <Button variant="primary" className="w-full" disabled={!valid || busy} onClick={submit}>
             {busy ? 'Creating…' : 'Create — it goes live now'}

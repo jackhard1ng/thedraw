@@ -119,6 +119,21 @@ FORMATS.push(
     requiresWitness: true,
     eligibleForMoney: true,
   },
+  {
+    id: 'headsUpNine',
+    name: '9-Hole Heads-Up (net)',
+    teamSize: 1,
+    scoring: 'matchPlay',
+    // null (NOT {type:'none'}) means FULL handicap difference for match play —
+    // the higher index gets every stroke of the gap, so a 4 and a 14 play an
+    // even match. This is the fair version of the scratch nineHoleMatch.
+    handicapAllowance: null,
+    advancement: 'bracket',
+    holes: 9,
+    flightBy: 'individualIndex',
+    requiresWitness: true,
+    eligibleForMoney: true,
+  },
 );
 
 for (const f of FORMATS) await db.doc(`formats/${f.id}`).set(f, { merge: true });
@@ -127,6 +142,25 @@ console.log(`Seeded ${FORMATS.length} formats`);
 // Instant-event templates (addendum §2) — the 10% tier. Members instantiate
 // these; the template is the organizer's act.
 const TEMPLATES = [
+  {
+    // HEADS-UP MONEY MATCH — the simplest paid game, and the one a normal user
+    // reaches for: you + one opponent, winner takes the pot (minus the small
+    // platform fee). Net match play (full handicap difference) so a 4 and a 14
+    // play for the same $20 fairly. Runs the instant the second player joins;
+    // if nobody takes it, every hold is released and nobody is charged.
+    id: 'headsUp',
+    marketId: 'kc',
+    name: 'Heads-Up Match',
+    formatId: 'headsUpNine',
+    fieldSize: 2,
+    fieldSizeMin: 2,
+    entryFeeMinCents: 1000,
+    entryFeeMaxCents: 20000,
+    allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 10,
+    requiresGhinAboveCents: 10000, // $100+/player → stricter eligibility
+    active: true,
+  },
   {
     // Day-one on-ramp: FREE, 9 holes, runs at 4+. A brand-new market has
     // something enterable the moment the second player signs up — and a free

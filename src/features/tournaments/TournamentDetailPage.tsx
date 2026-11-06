@@ -190,6 +190,9 @@ export function TournamentDetailPage() {
   const myEntry = entries?.find((e) => uid && e.userIds.includes(uid) && e.status !== 'withdrawn');
   const isCreator = !!uid && tournament.createdBy === uid;
   const free = tournament.entryFeeCents === 0;
+  const winnerTakeAll =
+    (tournament.payoutTable?.length ?? 0) > 0 &&
+    (tournament.payoutTable ?? []).every((r) => r.place === 1);
   const hasAddedPrize =
     tournament.prizeType === 'sponsoredPrizes' && (tournament.sponsoredPrizes?.length ?? 0) > 0;
   const item = itemizeEntry(tournament.entryFeeCents, tournament.adminFeePercent);
@@ -560,6 +563,33 @@ export function TournamentDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Stake mechanics — shown to a prospective joiner on a paid event, so
+          the hold → capture-at-lock → payout → release story is clear before
+          they commit a card. */}
+      {!free && !myEntry && tournament.status === 'open' && (
+        <Card className="mt-6 p-4">
+          <p className="font-display uppercase tracking-wide text-xs text-ink-faint">
+            How the stake works
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-ink-soft">
+            <li>
+              · Your <Num className="text-ink">{formatCents(tournament.entryFeeCents)}</Num> is{' '}
+              <span className="text-ink">held, not charged</span>, when you join.
+            </li>
+            <li>· It's captured only once the field locks and the game is on.</li>
+            <li>
+              ·{' '}
+              {winnerTakeAll
+                ? 'Winner takes the pot'
+                : 'Winners are paid per the grid above'}
+              , minus a small platform fee.
+            </li>
+            <li>· If it doesn't fill or is canceled, the hold is released — you pay nothing.</li>
+            <li>· Green fees are paid separately, at the course.</li>
+          </ul>
+        </Card>
+      )}
 
       <Rule className="my-8" />
 

@@ -302,6 +302,87 @@ async function main() {
   } catch { badShape = true; }
   check('disallowed payout shape rejected', badShape);
 
+  // ================= FLOW M — heads-up money match (2-player) ===============
+  console.log('\nFLOW M — heads-up money match (2-player, winner-take-all)');
+  // The real format + template added to the product seed (scripts/seed.mjs).
+  await db.doc('formats/headsUpNine').set({
+    id: 'headsUpNine', name: '9-Hole Heads-Up (net)', teamSize: 1, scoring: 'matchPlay',
+    handicapAllowance: null, advancement: 'bracket', holes: 9, flightBy: 'individualIndex',
+    requiresWitness: true, eligibleForMoney: true,
+  });
+  await db.doc('eventTemplates/headsUp').set({
+    marketId: 'kc', name: 'Heads-Up Match', formatId: 'headsUpNine', fieldSize: 2, fieldSizeMin: 2,
+    entryFeeMinCents: 1000, entryFeeMaxCents: 20000, allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 10, requiresGhinAboveCents: 10000, active: true,
+  });
+
+  // (M1) The REAL paid template produces a correct 2-player match-play event.
+  const huPaid = await call(fns.createInstantEvent, 'p1', {
+    templateId: 'headsUp', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 2000, payoutShape: 'winnerTakeAll',
+  });
+  const huDoc = (await db.doc(`tournaments/${huPaid.tournamentId}`).get()).data();
+  check('heads-up event live immediately', huDoc.status === 'open');
+  check('heads-up is a 2-player field', huDoc.minEntries === 2 && huDoc.maxEntries === 2, [huDoc.minEntries, huDoc.maxEntries]);
+  check('heads-up is winner-take-all gross', huDoc.payoutTable.length === 1 && huDoc.payoutTable[0].sharePercent === 100 && huDoc.payoutTable[0].division === 'gross' && huDoc.payoutTable[0].place === 1);
+  check('heads-up is net match play', huDoc.formatId === 'headsUpNine' && huDoc.divisionMode === 'grossOnly');
+
+  // (M2) Full real path on a FREE 2-player match-play event: enter → close →
+  // bracket of ONE → play → complete. Proves the 2-entry bracket build.
+  await db.doc('eventTemplates/headsUpFree').set({
+    marketId: 'kc', name: 'Heads-Up (free)', formatId: 'headsUpNine', fieldSize: 2, fieldSizeMin: 2,
+    entryFeeMinCents: 0, entryFeeMaxCents: 0, allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 0, requiresGhinAboveCents: 999999, active: true,
+  });
+  const huFree = await call(fns.createInstantEvent, 'p1', {
+    templateId: 'headsUpFree', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const hf = huFree.tournamentId;
+  const he1 = (await call(fns.enterTournament, 'p1', { tournamentId: hf })).entryId;
+  const he2 = (await call(fns.enterTournament, 'p2', { tournamentId: hf })).entryId;
+  check('both players entered the heads-up match', !!he1 && !!he2);
+  await call(fns.closeRegistration, 'org1', { tournamentId: hf });
+  const hfAfter = (await db.doc(`tournaments/${hf}`).get()).data();
+  check('heads-up close → inProgress', hfAfter.status === 'inProgress', hfAfter.status);
+  check('heads-up builds a single-match bracket (rounds=1)', hfAfter.bracketRounds === 1, hfAfter.bracketRounds);
+  const hm0 = (await db.doc(`matches/${hf}_r1_m0`).get()).data();
+  check('the one match pairs both players', hm0 && hm0.entryIds.includes(he1) && hm0.entryIds.includes(he2));
+  const hday = Date.now() + 2 * 86400000;
+  await call(fns.submitAvailability, 'p1', { matchId: `${hf}_r1_m0`, dates: [hday, hday + 86400000, hday + 2 * 86400000] });
+  await call(fns.submitAvailability, 'p2', { matchId: `${hf}_r1_m0`, dates: [hday, hday + 86400000, hday + 2 * 86400000] });
+  await call(fns.setAgreedTime, 'p1', { matchId: `${hf}_r1_m0`, agreedTime: hday, placeId: null, bookedBy: 'p1' });
+  await call(fns.submitResult, 'p1', { matchId: `${hf}_r1_m0`, winnerEntryId: he1, margin: '2&1' });
+  await call(fns.confirmResult, 'p2', { matchId: `${hf}_r1_m0` });
+  const hfDone = (await db.doc(`tournaments/${hf}`).get()).data();
+  check('heads-up match complete → tournament complete', hfDone.status === 'complete', hfDone.status);
+  const hAwards = await db.collection('awards').where('tournamentId', '==', hf).get();
+  const hByUser = {}; hAwards.docs.forEach((d) => { hByUser[d.data().userId] = d.data().placement; });
+  check('heads-up champion = p1', hByUser.p1 === 'champion', hByUser);
+
+  // (M3) Paid winner-take-all payout math for a 2-player match: direct-seed a
+  // completed bracket, verify the winner nets the pot minus the $10 floor fee.
+  const huPay = 'headsUpPaid1';
+  await db.doc(`tournaments/${huPay}`).set({
+    marketId: 'kc', formatId: 'headsUpNine', createdBy: 'p1', name: 'Heads-Up $20',
+    description: '', entryFeeCents: 2000, adminFeePercent: 10,
+    payoutTable: [{ division: 'gross', place: 1, sharePercent: 100 }],
+    divisionMode: 'grossOnly', doubleDipRule: 'onePrizePerPlayer', prizeType: 'cashPurse',
+    sponsoredPrizes: null, minEntries: 2, maxEntries: 2,
+    registrationOpens: Timestamp.now(), registrationCloses: Timestamp.now(),
+    eligibility: {}, structure: 'bracket', roundDeadlineDays: 1,
+    status: 'inProgress', bracketRounds: 1, entryIds: ['hp1', 'hp2'],
+  });
+  await db.doc('entries/hp1').set({ tournamentId: huPay, userIds: ['p1'], teamId: null, teamName: null, captainId: 'p1', combinedIndex: 7, flight: null, seed: 1, paymentIntentId: 'pi', paymentStatus: 'captured', status: 'active' });
+  await db.doc('entries/hp2').set({ tournamentId: huPay, userIds: ['p2'], teamId: null, teamName: null, captainId: 'p2', combinedIndex: 12, flight: null, seed: 2, paymentIntentId: 'pi', paymentStatus: 'captured', status: 'active' });
+  await db.doc(`matches/${huPay}_r1_m0`).set({
+    tournamentId: huPay, round: 1, entryIds: ['hp1', 'hp2'],
+    status: 'complete', result: { winnerEntryId: 'hp1', margin: '3&2', submittedBy: 'hp1', confirmedBy: 'hp2', confirmedAt: Timestamp.now() },
+  });
+  await maybeCompleteTournament(huPay);
+  const huLedger = await db.collection('ledger').where('tournamentId', '==', huPay).get();
+  const huPayouts = huLedger.docs.map((d) => d.data()).filter((r) => r.type === 'payout');
+  // pool: 2×2000=4000; admin=max(2×200,1000)=1000; winner nets 3000.
+  check('heads-up winner nets pot minus $10 floor (3000)', huPayouts.length === 1 && huPayouts[0].amountCents === 3000 && huPayouts[0].toUserId === 'p1', huPayouts.map((r) => [r.toUserId, r.amountCents]));
+
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');
   const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {

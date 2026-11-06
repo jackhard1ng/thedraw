@@ -153,6 +153,21 @@ export function TournamentListPage() {
           <p className="font-display uppercase tracking-wide text-ink-soft">
             No {tab === 'open' ? 'open' : tab === 'live' ? 'live' : 'past'} events
           </p>
+          {tab === 'open' && (
+            <>
+              <p className="mx-auto mt-2 max-w-xs text-sm text-ink-faint">
+                Challenge someone to a heads-up match for a few bucks, or spin up
+                a small tournament. Your stake is only held — never charged unless
+                the game runs.
+              </p>
+              <Link
+                to="/tournaments/new-game"
+                className="mt-4 inline-block rounded-sm bg-ink px-4 py-2 font-display uppercase tracking-wide text-xs text-paper"
+              >
+                Start a game →
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
