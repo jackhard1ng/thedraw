@@ -190,6 +190,8 @@ export function TournamentDetailPage() {
   const myEntry = entries?.find((e) => uid && e.userIds.includes(uid) && e.status !== 'withdrawn');
   const isCreator = !!uid && tournament.createdBy === uid;
   const free = tournament.entryFeeCents === 0;
+  const hasAddedPrize =
+    tournament.prizeType === 'sponsoredPrizes' && (tournament.sponsoredPrizes?.length ?? 0) > 0;
   const item = itemizeEntry(tournament.entryFeeCents, tournament.adminFeePercent);
   const field = tournament.entryIds?.length ?? 0;
   const full = field >= tournament.maxEntries;
@@ -407,7 +409,11 @@ export function TournamentDetailPage() {
         <SectionHeader
           right={
             <span className="text-xs text-ink-faint">
-              {tournament.prizeType === 'cashPurse' ? 'Cash purse' : 'Sponsored'}
+              {tournament.prizeType === 'cashPurse'
+                ? 'Cash purse'
+                : free
+                  ? 'Prize put up by organizer'
+                  : 'Added prizes'}
             </span>
           }
         >
@@ -442,7 +448,29 @@ export function TournamentDetailPage() {
       <div className="mt-6">
         <SectionHeader>Entry fee</SectionHeader>
         {free ? (
-          <p className="text-lg text-pine">Free event — no entry fee.</p>
+          <Card className="p-4">
+            <p className="text-lg text-pine">Free to enter — no entry fee, no cut.</p>
+            {hasAddedPrize ? (
+              <p className="mt-2 text-sm text-ink-soft">
+                The prize here is put up by the organizer, not pooled from entry
+                fees — so there’s no pot for The Draw to take a percentage of.
+                This one’s free end to end: just show up and play for it.
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-ink-soft">
+                No entry fee and no pot — this one’s for the game and the bragging
+                rights.
+              </p>
+            )}
+            <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-faint">
+              Most games on The Draw run on a pot: players put up the stakes, we
+              hold the money and take a small percentage only if the game
+              happens, then pay the winner. This one’s on the house.
+            </p>
+            <p className="mt-1 text-xs text-ink-faint">
+              Green fees are separate — you pay the course directly when you play.
+            </p>
+          </Card>
         ) : (
           <Card className="p-4">
             <p className="text-ink">

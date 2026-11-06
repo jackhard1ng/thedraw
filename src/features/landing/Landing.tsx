@@ -101,7 +101,7 @@ export function Landing() {
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">
         {[
           ['Matched to your level', 'Find an opponent near your handicap, or grab a buddy and take on another pair. Mixed-handicap teams are welcome — a 5 and a 20 can team up, and net scoring gives them a real shot.'],
-          ['You book the round', 'The Draw finds you the game and handles the pot — your entry is held and only charged if the game happens, then paid to the winner. You book your own public tee time, like always. We don’t reserve slots or run courses; we connect the players. Green fees stay with the course.'],
+          ['You book the round', 'The Draw is free to join. When there’s a pot, we hold it and take a small percentage — only if the game actually happens — then pay the winner. No chasing Venmo in the parking lot. You book your own public tee time, like always; we don’t reserve slots or run courses, we connect the players. Green fees always go straight to the course.'],
           ['The league that was already full', 'The good leagues sell out the week they open, at one course, on one night. Here you can spin up a small tournament or a rotating mini-league whenever you want, across whatever courses you pick — no closed registration window to miss.'],
         ].map(([h, b]) => (
           <div key={h} className="flex gap-3">
