@@ -1,9 +1,11 @@
 /**
- * The landing page — what a cold QR scan opens (dropped at a sold-out men's
- * league, a range, a muni counter). Pitched at exactly that golfer: the league
- * filled up, the season moved on without you, and this is the league that
- * doesn't do that. The live board renders as proof of life (roundPosts are
- * world-readable for precisely this reason).
+ * The landing page — what a cold QR scan opens (dropped at a range, a muni
+ * counter, a course parking lot). Pitched at a competitive golfer without a
+ * regular group: find a match near your handicap, team up for a scramble, or
+ * run a small event — you book your own tee time, the app connects the players
+ * and handles the pot. The sold-out-league pain is the door-opener, not a claim
+ * that we reserve slots. The live board renders as proof of life (roundPosts
+ * are world-readable for precisely this reason).
  *
  * `?src=coursename` on the QR URL is stored and attached to the user doc at
  * onboarding, so every flyer drop is measurable.
@@ -82,26 +84,25 @@ export function Landing() {
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-6 py-10 text-center">
       <Mark className="mx-auto mb-4 h-14 w-14 text-ink" />
       <p className="mb-3 font-display uppercase tracking-[0.18em] text-xs text-tournament">
-        Real games · real stakes · any handicap
+        Competitive golf · any handicap · Kansas City
       </p>
       <h1 className="text-4xl leading-tight">
-        The league that
+        Find a game
         <br />
-        was already full.
+        worth playing.
       </h1>
       <p className="mt-3 text-ink-soft">
-        Every good league in town sells out the week registration opens, at one
-        course, on one night. We run leagues, tournaments, and one-off matches
-        across the whole city — a different course each week, a spot open any
-        time. Competition shouldn’t require knowing exactly when and where to
-        look.
+        The Draw matches you with players near your handicap for a competitive
+        round — an after-work nine, a 2-man scramble with a buddy, a small
+        tournament — sometimes for money, always fair. You find the game and
+        book your own tee time. No regular group required.
       </p>
 
       <div className="my-6 space-y-2 text-left text-sm text-ink-soft">
         {[
-          ['Never sells out', 'A single course has a handful of Tuesday slots; the city has hundreds. We spread a league across them, so there’s always room and a fresh course each week.'],
-          ['Grab your buddy', 'Team up for a 2-man scramble and take on the field — the most fun you can have for $20. Or go solo in a league, a tournament, or a one-off match. Host one in a minute or drop into one that’s running.'],
-          ['Fair at every level', 'Handicapped formats, flights, and net divisions mean a 16-and-a-20 duo can beat the scratch pair on the right day. You don’t have to be good — you have to show up.'],
+          ['Matched to your level', 'Find an opponent near your handicap, or grab a buddy and take on another pair. Mixed-handicap teams are welcome — a 5 and a 20 can team up, and net scoring gives them a real shot.'],
+          ['You book the round', 'The Draw finds you the game and handles the pot — your entry is held and only charged if the game happens, then paid to the winner. You book your own public tee time, like always. We don’t reserve slots or run courses; we connect the players. Green fees stay with the course.'],
+          ['The league that was already full', 'The good leagues sell out the week they open, at one course, on one night. Here you can spin up a small tournament or a rotating mini-league whenever you want, across whatever courses you pick — no closed registration window to miss.'],
         ].map(([h, b]) => (
           <div key={h} className="flex gap-3">
             <span className="mt-0.5 font-display uppercase tracking-wide text-xs text-tournament">
