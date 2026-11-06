@@ -700,6 +700,30 @@ export async function runClose(tournamentId: string) {
       allowance,
       t.roundDeadlineDays ?? 7,
     );
+
+    // LIVE SCORING: assign playing groups for round 1 so ONE scorekeeper per
+    // group enters holes live (saveStrokeHole), and everyone watches the
+    // leaderboard. Default keeper = the first entry's captain; any member can
+    // claim it. Groups of up to groupSize (default 4), by seed order.
+    const groupSize = Math.max(2, format?.groupSize ?? 4);
+    const holeCount = format?.holes ?? 18;
+    const groupPlace = designated[0] ?? t.placeId ?? '';
+    const gBatch = db.batch();
+    for (let i = 0; i < entries.length; i += groupSize) {
+      const slice = entries.slice(i, i + groupSize);
+      const gi = i / groupSize;
+      gBatch.set(db.doc(`scoreGroups/${tournamentId}_g${gi}`), {
+        tournamentId,
+        groupIndex: gi,
+        round: 1,
+        entryIds: slice.map((e) => e.id),
+        placeId: groupPlace,
+        holeCount,
+        scorekeeperUid: slice[0].userIds[0],
+        status: 'live',
+      });
+    }
+    await gBatch.commit();
   }
 
   await tRef.update({ status: 'inProgress', bracketRounds });

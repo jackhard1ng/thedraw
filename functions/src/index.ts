@@ -47,6 +47,14 @@ export {
 } from './matches';
 
 export {
+  claimScorekeeper,
+  saveStrokeHole,
+  finalizeGroup,
+  saveMatchHole,
+  finalizeMatchScores,
+} from './live';
+
+export {
   verifyHandicap,
   adjustTourIndex,
   resolveDispute,

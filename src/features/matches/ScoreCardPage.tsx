@@ -5,6 +5,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { SectionHeader } from '@/components/ui';
 import { StrokePlayScoreCard } from './StrokePlayScoreCard';
+import { GroupScorecard } from './GroupScorecard';
 
 export function ScoreCardPage() {
   const { id } = useParams();
@@ -15,7 +16,10 @@ export function ScoreCardPage() {
       <button onClick={() => nav(`/tournaments/${id}/leaderboard`)} className="btn-quiet mb-4 px-0">
         ← Leaderboard
       </button>
-      <SectionHeader>Your scorecard</SectionHeader>
+      <SectionHeader>Scoring</SectionHeader>
+      <div className="mb-6">
+        <GroupScorecard tournamentId={id} />
+      </div>
       <StrokePlayScoreCard tournamentId={id} />
     </div>
   );

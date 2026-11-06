@@ -140,6 +140,28 @@ export const disputeRoundScore = httpsCallable<
   { ok: boolean }
 >(functions, 'disputeRoundScore');
 
+// ---- Live scoring (hole-by-hole; a scorekeeper per group) ------------------
+export const claimScorekeeper = httpsCallable<
+  { scope: 'group' | 'match'; id: string },
+  { ok: boolean }
+>(functions, 'claimScorekeeper');
+export const saveStrokeHole = httpsCallable<
+  { groupId: string; hole: number; scores: Record<string, number> },
+  { ok: boolean }
+>(functions, 'saveStrokeHole');
+export const finalizeGroup = httpsCallable<
+  { groupId: string },
+  { ok: boolean }
+>(functions, 'finalizeGroup');
+export const saveMatchHole = httpsCallable<
+  { matchId: string; hole: number; scores: Record<string, number> },
+  { ok: boolean }
+>(functions, 'saveMatchHole');
+export const finalizeMatchScores = httpsCallable<
+  { matchId: string },
+  { ok: boolean; margin?: string }
+>(functions, 'finalizeMatchScores');
+
 // ---- Green fees + cancellation ladder (§5 — never player-to-player debt) ---
 export const collectGreenFees = httpsCallable<
   { matchId: string; perPlayerCents: number },

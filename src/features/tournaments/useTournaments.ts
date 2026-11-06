@@ -24,6 +24,7 @@ import type {
   Format,
   Match,
   Scorecard,
+  ScoreGroup,
   Tournament,
   TournamentStatus,
   User,
@@ -39,6 +40,9 @@ export interface MatchWithId extends Match {
   id: string;
 }
 export interface ScorecardWithId extends Scorecard {
+  id: string;
+}
+export interface ScoreGroupWithId extends ScoreGroup {
   id: string;
 }
 
@@ -191,10 +195,27 @@ export function useTournamentScorecards(
   return rows;
 }
 
+export function useScoreGroups(
+  tournamentId: string | undefined,
+): ScoreGroupWithId[] | null {
+  const [rows, setRows] = useState<ScoreGroupWithId[] | null>(null);
+  useEffect(() => {
+    if (!tournamentId) return;
+    const q = query(
+      collection(db, 'scoreGroups'),
+      where('tournamentId', '==', tournamentId),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setRows(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ScoreGroup) }))),
+      () => setRows([]),
+    );
+  }, [tournamentId]);
+  return rows;
+}
+
 /**
- * Resolve a set of user ids to their `users` docs. Names on entries are only
- * denormalized for teams (`teamName`); singles competitors are resolved here so
- * brackets and leaderboards can print real names beside frozen indexes.
+ * Resolve a set of user ids to their `users` docs.
  *
  * Firestore `in` queries cap at 30, so we chunk and getDocs each batch. Names
  * change rarely, so a one-shot fetch per id-set (not a live listener) is fine.

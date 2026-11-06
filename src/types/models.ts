@@ -377,6 +377,9 @@ export interface Match {
   status: MatchStatus;
   forfeitedBy: string | null;
   forfeitReason: string | null;
+  /** Live scoring: who enters the group's holes. Defaults to the booker when
+   *  the tee time is set; either player can claim it (claimScorekeeper). */
+  scorekeeperUid?: string | null;
   /**
    * Present ONLY when the booker prepaid and opted to split (§5). Default is
    * green fees paid individually at the course — no money through the app.
@@ -412,7 +415,10 @@ export interface Scorecard {
   gross: number; // strokes
   courseHandicap: number | null; // frozen; null if course lacks tee data
   net: number | null; // gross - courseHandicap
-  holes: HoleResult[] | null; // modeled now, populated Phase 4
+  // Live hole-by-hole gross for THIS entry, index 0 = hole 1. The scorekeeper
+  // fills it during play (saveStrokeHole); finalizeGroup sets `gross` from its
+  // sum and moves the card to awaitingConfirmation. Null until the first hole.
+  holes: number[] | null;
   submittedBy: string | null;
   confirmedBy: string | null;
   confirmDeadline: Ts | null;
@@ -426,6 +432,22 @@ export interface Scorecard {
   disputeNote?: string | null;
   disputedAt?: Ts | null;
   resolvedByOrganizer?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// scoreGroups/{tournamentId}_g{index} — a stroke-play playing group (a
+// foursome). Assigned at close so ONE scorekeeper enters the group's holes
+// live; everyone else watches the leaderboard. Doc id: `${tid}_g${index}`.
+// ---------------------------------------------------------------------------
+export interface ScoreGroup {
+  tournamentId: string;
+  groupIndex: number;
+  round: number;
+  entryIds: string[]; // up to groupSize (default 4)
+  placeId: string; // the course they're playing, for holePars / stroke index
+  holeCount: number; // 9 or 18 — scorecard.holes arrays are this length
+  scorekeeperUid: string; // default: first entry's captain; claimable
+  status: 'live' | 'closed';
 }
 
 // ---------------------------------------------------------------------------

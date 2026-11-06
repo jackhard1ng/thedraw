@@ -25,6 +25,8 @@ export interface BuiltInput extends LbInput {
   diffs: (string | null)[];
   /** True while any counted round is still awaiting a partner's confirmation. */
   provisional: boolean;
+  /** True while a round is being scored live (partial holes, not yet final). */
+  live: boolean;
 }
 
 export interface LeaderboardData {
@@ -77,7 +79,8 @@ export function useLeaderboard(tournamentId: string): LeaderboardData {
   const entries = useTournamentEntries(tournamentId);
   const scorecards = useTournamentScorecards(tournamentId);
   const users = useUsers((entries ?? []).flatMap((e) => e.userIds));
-  const courses = useCourses(format?.designatedCourses ?? []);
+  const tournamentPlaceId = (tournament as { placeId?: string } | null)?.placeId ?? null;
+  const courses = useCourses([...(format?.designatedCourses ?? []), tournamentPlaceId ?? ''].filter(Boolean));
 
   const ready = !!tournament && entries !== null && scorecards !== null;
 
@@ -95,9 +98,13 @@ export function useLeaderboard(tournamentId: string): LeaderboardData {
 
   const roundCount = format?.rounds ?? Math.max(1, ...scorecards.map((s) => s.round), 1);
 
+  const courseForRound = (i: number): Course | undefined => {
+    const placeId = format?.designatedCourses?.[i] ?? tournamentPlaceId ?? undefined;
+    return placeId ? courses[placeId] : undefined;
+  };
+
   const pars = Array.from({ length: roundCount }, (_, i) => {
-    const placeId = format?.designatedCourses?.[i];
-    const c = placeId ? courses[placeId] : undefined;
+    const c = courseForRound(i);
     return c?.teeSets?.[0]?.par ?? c?.holePars?.reduce((a, b) => a + b, 0) ?? 72;
   });
 
@@ -105,31 +112,60 @@ export function useLeaderboard(tournamentId: string): LeaderboardData {
     .filter((e) => e.status !== 'withdrawn')
     .map((e) => {
       const cards = scorecards.filter((s) => s.entryId === e.id);
+      // Per-entry par per round: usually the full round par, but for a round
+      // being scored LIVE it's the par of the holes played so far (so to-par is
+      // honest at "thru 7"). Needs the course's holePars; without them the live
+      // round contributes no to-par (we still show Thru).
+      const entryPars = [...pars];
+      let liveHoles = 0;
+      let isLive = false;
       const rounds = Array.from({ length: roundCount }, (_, i) => {
-        const card = cards.find((s) => s.round === i + 1 && counts(s.status));
-        return card ? card.gross : null;
+        const card = cards.find((s) => s.round === i + 1);
+        if (!card) return null;
+        if (counts(card.status)) return card.gross;
+        // Live: partial holes entered but not yet finalized.
+        const holes = Array.isArray(card.holes) ? card.holes : [];
+        const played = holes.map((s, idx) => ({ s, idx })).filter((x) => x.s > 0);
+        if (played.length === 0) return null;
+        const hp = courseForRound(i)?.holePars ?? null;
+        if (i === roundCount - 1 || liveHoles === 0) {
+          liveHoles = played.length;
+          isLive = true;
+        }
+        if (hp && hp.length >= holes.length) {
+          entryPars[i] = played.reduce((a, x) => a + (hp[x.idx] ?? 4), 0);
+          return played.reduce((a, x) => a + x.s, 0);
+        }
+        return null; // no per-hole par → can't score to-par live; Thru still shows
       });
-      // courseHandicap can differ per round; the helper takes one, so use the
-      // first frozen value on record for this entry (best-effort for net).
       const ch = cards.find((s) => s.courseHandicap != null)?.courseHandicap ?? null;
-      const played = rounds.filter((r) => r != null).length;
+      const playedRounds = rounds.filter((r) => r != null).length;
       const diffs = rounds.map((g, i) =>
-        g != null && ch != null ? differential(g, ch, pars[i]) : null,
+        g != null && ch != null ? differential(g, ch, entryPars[i]) : null,
       );
+      const allFinal = cards.length > 0 && cards.every((s) => counts(s.status));
+      const thru = allFinal
+        ? 'F'
+        : isLive && liveHoles > 0
+          ? String(liveHoles)
+          : playedRounds === 0
+            ? '–'
+            : playedRounds === roundCount
+              ? 'F'
+              : String(playedRounds);
       return {
         entryId: e.id,
-        // Flight rides the name — "Vogel, M. · Flt B" — so a flighted field
-        // reads who you're actually competing against at a glance.
         name:
           entryDisplay(e, users).name +
           ((e as { flight?: string | null }).flight ? ` · Flt ${(e as { flight?: string | null }).flight}` : ''),
         index: e.combinedIndex,
         rounds,
         courseHandicap: ch,
-        pars,
-        thru: played === 0 ? '–' : played === roundCount ? 'F' : String(played),
+        pars: entryPars,
+        thru,
         diffs,
         provisional: cards.some((s) => s.status === 'awaitingConfirmation'),
+        live: isLive,
       } satisfies BuiltInput;
     });
 

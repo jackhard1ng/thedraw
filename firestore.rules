@@ -175,6 +175,7 @@ service cloud.firestore {
     match /entries/{id}            { allow read: if true; allow write: if false; }
     match /matches/{id}            { allow read: if true; allow write: if false; }
     match /scorecards/{id}         { allow read: if true; allow write: if false; }
+    match /scoreGroups/{id}        { allow read: if true; allow write: if false; }
     match /teams/{id}              { allow read: if true; allow write: if false; }
     match /awards/{id}             { allow read: if true; allow write: if false; }
     match /formats/{id}            { allow read: if true; allow write: if false; }

@@ -435,6 +435,78 @@ async function main() {
   // p1 ruled 71 beats p2's 75 → winner-take-all, pool 4000 − $10 floor = 3000.
   check('winner (p1) paid pot minus floor after ruling', dPay.length === 1 && dPay[0].toUserId === 'p1' && dPay[0].amountCents === 3000, dPay.map((r) => [r.toUserId, r.amountCents]));
 
+  // ================= FLOW O — live stroke scoring (scorekeeper + groups) =====
+  console.log('\nFLOW O — live stroke: groups at close, keeper enters holes, finalize → confirm');
+  await db.doc('eventTemplates/liveFoursome').set({
+    marketId: 'kc', name: 'Live Foursome (free)', formatId: 'grossFoursome', fieldSize: 4, fieldSizeMin: 2,
+    entryFeeMinCents: 0, entryFeeMaxCents: 0, allowedPayoutShapes: ['winnerTakeAll'],
+    adminFeePercent: 0, requiresGhinAboveCents: 999999, active: true,
+  });
+  const liveEvt = await call(fns.createInstantEvent, 'p1', {
+    templateId: 'liveFoursome', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const lt = liveEvt.tournamentId;
+  const le = {};
+  for (const uid of ['p1', 'p2', 'p3', 'p4']) le[uid] = (await call(fns.enterTournament, uid, { tournamentId: lt })).entryId;
+  await call(fns.closeRegistration, 'org1', { tournamentId: lt });
+  const grp = (await db.doc(`scoreGroups/${lt}_g0`).get()).data();
+  check('a score group is created at close', !!grp && grp.status === 'live' && grp.entryIds.length === 4, grp && { n: grp.entryIds.length, s: grp.status });
+  check('default scorekeeper is the first seed', grp.scorekeeperUid === 'p4', grp.scorekeeperUid); // p4 (4.2) seeds 1st
+  // A non-keeper cannot enter scores.
+  let nonKeeper = false;
+  try { await call(fns.saveStrokeHole, 'p1', { groupId: `${lt}_g0`, hole: 1, scores: { [le.p1]: 4 } }); } catch { nonKeeper = true; }
+  check('a non-scorekeeper cannot enter scores', nonKeeper);
+  // p1 claims scoring, then enters three holes for the whole group.
+  await call(fns.claimScorekeeper, 'p1', { scope: 'group', id: `${lt}_g0` });
+  check('scorekeeper claim works', (await db.doc(`scoreGroups/${lt}_g0`).get()).data().scorekeeperUid === 'p1');
+  const grossMap = { p1: [4, 5, 4], p2: [5, 5, 6], p3: [6, 5, 5], p4: [4, 4, 4] };
+  for (let h = 1; h <= 3; h++) {
+    const scores = {};
+    for (const uid of ['p1', 'p2', 'p3', 'p4']) scores[le[uid]] = grossMap[uid][h - 1];
+    await call(fns.saveStrokeHole, 'p1', { groupId: `${lt}_g0`, hole: h, scores });
+  }
+  const liveCard = (await db.doc(`scorecards/${lt}_${le.p4}_1`).get()).data();
+  check('holes land on the card live (p4 thru 3 = 12)', Array.isArray(liveCard.holes) && liveCard.holes.slice(0, 3).reduce((a, b) => a + b, 0) === 12, liveCard.holes?.slice(0, 3));
+  // Finish the group → each card posts its running gross for confirmation.
+  await call(fns.finalizeGroup, 'p1', { groupId: `${lt}_g0` });
+  const p4card = (await db.doc(`scorecards/${lt}_${le.p4}_1`).get()).data();
+  check('finalize sets gross from holes (p4 = 12) and awaits confirmation', p4card.gross === 12 && p4card.status === 'awaitingConfirmation', { g: p4card.gross, s: p4card.status });
+  check('group closes after finalize', (await db.doc(`scoreGroups/${lt}_g0`).get()).data().status === 'closed');
+  // Confirm every card with a DIFFERENT-entry partner → event completes.
+  const confirmBy = { p1: 'p2', p2: 'p3', p3: 'p4', p4: 'p1' };
+  for (const owner of ['p1', 'p2', 'p3', 'p4']) {
+    await call(fns.confirmRoundScore, confirmBy[owner], { scorecardId: `${lt}_${le[owner]}_1` });
+  }
+  check('live-scored event completes after confirmations', (await db.doc(`tournaments/${lt}`).get()).data().status === 'complete');
+
+  // ================= FLOW P — live match scoring (net, derive result) =======
+  console.log('\nFLOW P — live match: keeper enters holes, finalize derives net margin → confirm');
+  const lmEvt = await call(fns.createInstantEvent, 'p1', {
+    templateId: 'headsUpFree', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const lm = lmEvt.tournamentId;
+  const lme1 = (await call(fns.enterTournament, 'p1', { tournamentId: lm })).entryId;
+  const lme2 = (await call(fns.enterTournament, 'p2', { tournamentId: lm })).entryId;
+  await call(fns.closeRegistration, 'org1', { tournamentId: lm });
+  const lmday = Date.now() + 2 * 86400000;
+  await call(fns.submitAvailability, 'p1', { matchId: `${lm}_r1_m0`, dates: [lmday, lmday + 86400000, lmday + 2 * 86400000] });
+  await call(fns.submitAvailability, 'p2', { matchId: `${lm}_r1_m0`, dates: [lmday, lmday + 86400000, lmday + 2 * 86400000] });
+  await call(fns.setAgreedTime, 'p1', { matchId: `${lm}_r1_m0`, agreedTime: lmday, placeId: null, bookedBy: 'p1' });
+  check('booker is the default match scorekeeper', (await db.doc(`matches/${lm}_r1_m0`).get()).data().scorekeeperUid === 'p1');
+  // p1 (seed 1 = entryIds[0]) wins each of 5 holes; closes out 5&4 over 9.
+  for (let h = 1; h <= 5; h++) {
+    await call(fns.saveMatchHole, 'p1', { matchId: `${lm}_r1_m0`, hole: h, scores: { [lme1]: 4, [lme2]: 6 } });
+  }
+  const liveMatch = (await db.doc(`matches/${lm}_r1_m0`).get()).data();
+  check('match holes land live (5 entered)', Array.isArray(liveMatch.result.holes) && liveMatch.result.holes.length === 5);
+  const finRes = await call(fns.finalizeMatchScores, 'p1', { matchId: `${lm}_r1_m0` });
+  const afterFin = (await db.doc(`matches/${lm}_r1_m0`).get()).data();
+  check('finalize derives a net winner + margin, awaits confirmation', afterFin.status === 'awaitingConfirmation' && afterFin.result.winnerEntryId === lme1 && !!afterFin.result.margin, { s: afterFin.status, w: afterFin.result.winnerEntryId, m: afterFin.result.margin });
+  check('scorekeeper is recorded as the submitter (opponent must confirm)', afterFin.result.submittedBy === lme1);
+  // The opponent confirms → match completes.
+  await call(fns.confirmResult, 'p2', { matchId: `${lm}_r1_m0` });
+  check('confirmed live match completes', (await db.doc(`matches/${lm}_r1_m0`).get()).data().status === 'complete');
+
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');
   const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {

@@ -98,8 +98,15 @@ export function Leaderboard({ tournamentId }: { tournamentId: string }) {
   const { ready, gross, net, showNet, roundCount, inputs } = useLeaderboard(tournamentId);
   if (!ready) return <Spinner />;
 
+  const anyLive = Array.from(inputs.values()).some((i) => i.live);
+
   return (
     <div className="space-y-8">
+      {anyLive && (
+        <p className="font-display uppercase tracking-wide text-xs text-tournament">
+          ● Live — scores update as groups play
+        </p>
+      )}
       <div>
         <h2 className="mb-2 border-b border-ink pb-1 text-lg">Gross</h2>
         <LbTable rows={gross} inputs={inputs} roundCount={roundCount} />

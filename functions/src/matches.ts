@@ -19,6 +19,7 @@ interface MatchDoc {
   scheduling: { deadline: Timestamp | null; extensionsUsed: Record<string, boolean> };
   result: any;
   status: string;
+  scorekeeperUid?: string | null;
 }
 
 /** Which of the match's two entries is captained by `uid`, or null. */
@@ -111,6 +112,9 @@ export const setAgreedTime = onCall<{
     'scheduling.placeId': req.data.placeId,
     'scheduling.bookedBy': req.data.bookedBy,
     status: 'scheduled',
+    // The booker keeps score by default — live hole entry opens to them, and
+    // either player can claim it (claimScorekeeper). Don't overwrite a claim.
+    ...(match.scorekeeperUid ? {} : { scorekeeperUid: req.data.bookedBy ?? uid }),
   });
   // Locking a time commits BOTH players — the other side gets a text, so a
   // unilateral lock-in is never a surprise discovered at the course.

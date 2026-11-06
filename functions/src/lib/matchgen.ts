@@ -44,6 +44,7 @@ interface NewMatch {
   status: string;
   forfeitedBy: null;
   forfeitReason: null;
+  scorekeeperUid: null;
 }
 
 function blankMatch(id: string, tid: string, round: number, entryIds: [string, string]): NewMatch {
@@ -75,6 +76,7 @@ function blankMatch(id: string, tid: string, round: number, entryIds: [string, s
     status: bothPresent ? 'scheduling' : 'pendingOpponent',
     forfeitedBy: null,
     forfeitReason: null,
+    scorekeeperUid: null, // defaulted to the booker when the tee time is set
   };
 }
 

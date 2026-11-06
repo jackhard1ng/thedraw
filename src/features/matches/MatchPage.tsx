@@ -53,6 +53,7 @@ import {
   type EntryWithId,
 } from '@/features/tournaments/useTournaments';
 import type { Course } from '@/types/models';
+import { MatchLiveScore } from './MatchLiveScore';
 
 /** The committee copy (spec §4 disputes) — shown wherever a result is in play. */
 function CommitteeNote() {
@@ -577,10 +578,11 @@ export function MatchPage() {
             )}
 
             <CommitteeNote />
+            <MatchLiveScore match={match} entries={twoEntries} course={course} nameOf={entryName} />
             {myEntry && (
               <>
                 <p className="font-display uppercase tracking-wide text-xs text-ink-soft">
-                  Report the result
+                  Or report the result manually
                 </p>
                 <ResultForm matchId={match.id} entries={twoEntries} nameOf={entryName} onError={setError} />
                 {/* The published cancellation ladder (§5) — deterministic. */}
