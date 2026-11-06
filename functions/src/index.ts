@@ -50,6 +50,7 @@ export {
   claimScorekeeper,
   saveStrokeHole,
   finalizeGroup,
+  postGroupTotals,
   saveMatchHole,
   finalizeMatchScores,
 } from './live';

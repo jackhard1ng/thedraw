@@ -25,6 +25,7 @@ import {
   removeThreadMembers,
   deriveStats,
   writeLedger,
+  mostPlayed,
 } from './shared';
 import {
   checkEligibility,
@@ -712,6 +713,9 @@ export async function runClose(tournamentId: string) {
     for (let i = 0; i < entries.length; i += groupSize) {
       const slice = entries.slice(i, i + groupSize);
       const gi = i / groupSize;
+      // Default scorekeeper = the group member with the most rounds played on
+      // the app (reliability with the flow, never handicap). One-tap claimable.
+      const keeper = (await mostPlayed(slice.map((e) => e.userIds[0]))) ?? slice[0].userIds[0];
       gBatch.set(db.doc(`scoreGroups/${tournamentId}_g${gi}`), {
         tournamentId,
         groupIndex: gi,
@@ -719,7 +723,7 @@ export async function runClose(tournamentId: string) {
         entryIds: slice.map((e) => e.id),
         placeId: groupPlace,
         holeCount,
-        scorekeeperUid: slice[0].userIds[0],
+        scorekeeperUid: keeper,
         status: 'live',
       });
     }

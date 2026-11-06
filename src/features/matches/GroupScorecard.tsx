@@ -15,7 +15,7 @@ import {
   useUsers,
   entryDisplay,
 } from '@/features/tournaments/useTournaments';
-import { claimScorekeeper, saveStrokeHole, finalizeGroup } from '@/lib/callable';
+import { claimScorekeeper, saveStrokeHole, finalizeGroup, postGroupTotals } from '@/lib/callable';
 
 export function GroupScorecard({ tournamentId }: { tournamentId: string }) {
   const { fbUser } = useAuth();
@@ -36,6 +36,8 @@ export function GroupScorecard({ tournamentId }: { tournamentId: string }) {
 
   const [hole, setHole] = useState(1);
   const [vals, setVals] = useState<Record<string, string>>({});
+  const [paper, setPaper] = useState(false);
+  const [totals, setTotals] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,72 +135,143 @@ export function GroupScorecard({ tournamentId }: { tournamentId: string }) {
 
       {isKeeper ? (
         <div className="mt-4 border-t border-rule pt-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-display uppercase tracking-wide text-xs text-ink-soft">
-              Enter hole
-            </span>
-            <div className="flex items-center gap-2 text-sm">
-              <button
-                className="btn-quiet px-2"
-                onClick={() => setHole(Math.max(1, hole - 1))}
-                disabled={hole <= 1}
-              >
-                −
-              </button>
-              <span className="tnum w-6 text-center text-ink">{hole}</span>
-              <button
-                className="btn-quiet px-2"
-                onClick={() => setHole(Math.min(group.holeCount, hole + 1))}
-                disabled={hole >= group.holeCount}
-              >
-                +
-              </button>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {group.entryIds.map((eid) => {
-              const existing = holesOf(eid)[hole - 1];
-              return (
-                <div key={eid} className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 truncate text-sm text-ink">{nameOf(eid)}</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={20}
-                    className="field-input tnum w-16 px-2 py-1 text-center"
-                    placeholder={existing ? String(existing) : '–'}
-                    value={vals[eid] ?? ''}
-                    onChange={(e) => setVals((v) => ({ ...v, [eid]: e.target.value }))}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
-          <div className="mt-3 flex gap-2">
-            <Button variant="primary" className="flex-1" disabled={busy} onClick={saveHole}>
-              {busy ? 'Saving…' : `Save hole ${hole}`}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={async () => {
-                if (!confirm('Post everyone’s card? Players then confirm their own.')) return;
-                setBusy(true);
-                setError(null);
-                try {
-                  await finalizeGroup({ groupId: group.id });
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
+          <div className="mb-3 flex gap-2 text-xs">
+            <button
+              className={`flex-1 rounded-sm border px-2 py-1 font-display uppercase tracking-wide ${!paper ? 'border-ink bg-ink text-paper' : 'border-rule-strong text-ink-soft'}`}
+              onClick={() => setPaper(false)}
             >
-              Finish
-            </Button>
+              Hole by hole
+            </button>
+            <button
+              className={`flex-1 rounded-sm border px-2 py-1 font-display uppercase tracking-wide ${paper ? 'border-ink bg-ink text-paper' : 'border-rule-strong text-ink-soft'}`}
+              onClick={() => setPaper(true)}
+            >
+              Paper (totals)
+            </button>
           </div>
+
+          {!paper ? (
+            <>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-display uppercase tracking-wide text-xs text-ink-soft">
+                  Enter hole
+                </span>
+                <div className="flex items-center gap-2 text-sm">
+                  <button
+                    className="btn-quiet px-2"
+                    onClick={() => setHole(Math.max(1, hole - 1))}
+                    disabled={hole <= 1}
+                  >
+                    −
+                  </button>
+                  <span className="tnum w-6 text-center text-ink">{hole}</span>
+                  <button
+                    className="btn-quiet px-2"
+                    onClick={() => setHole(Math.min(group.holeCount, hole + 1))}
+                    disabled={hole >= group.holeCount}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {group.entryIds.map((eid) => {
+                  const existing = holesOf(eid)[hole - 1];
+                  return (
+                    <div key={eid} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm text-ink">{nameOf(eid)}</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={20}
+                        className="field-input tnum w-16 px-2 py-1 text-center"
+                        placeholder={existing ? String(existing) : '–'}
+                        value={vals[eid] ?? ''}
+                        onChange={(e) => setVals((v) => ({ ...v, [eid]: e.target.value }))}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+              <div className="mt-3 flex gap-2">
+                <Button variant="primary" className="flex-1" disabled={busy} onClick={saveHole}>
+                  {busy ? 'Saving…' : `Save hole ${hole}`}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (!confirm('Post everyone’s card? Players then confirm their own.')) return;
+                    setBusy(true);
+                    setError(null);
+                    try {
+                      await finalizeGroup({ groupId: group.id });
+                    } catch (e) {
+                      setError((e as Error).message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Finish
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="mb-2 text-xs text-ink-faint">
+                Played on paper? Enter each player’s final total — they confirm it
+                the same way.
+              </p>
+              <div className="space-y-2">
+                {group.entryIds.map((eid) => (
+                  <div key={eid} className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 truncate text-sm text-ink">{nameOf(eid)}</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      className="field-input tnum w-20 px-2 py-1 text-center"
+                      placeholder="total"
+                      value={totals[eid] ?? ''}
+                      onChange={(e) => setTotals((v) => ({ ...v, [eid]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+              <Button
+                variant="primary"
+                className="mt-3 w-full"
+                disabled={busy}
+                onClick={async () => {
+                  const t: Record<string, number> = {};
+                  for (const eid of group.entryIds) {
+                    const n = Number(totals[eid]);
+                    if (totals[eid] && Number.isInteger(n) && n > 0) t[eid] = n;
+                  }
+                  if (Object.keys(t).length === 0) {
+                    setError('Enter at least one total.');
+                    return;
+                  }
+                  if (!confirm('Post these totals? Players then confirm their own.')) return;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await postGroupTotals({ groupId: group.id, totals: t });
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? 'Posting…' : 'Post totals'}
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <p className="mt-3 border-t border-rule pt-3 text-xs text-ink-faint">

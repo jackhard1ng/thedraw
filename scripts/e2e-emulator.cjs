@@ -451,10 +451,11 @@ async function main() {
   await call(fns.closeRegistration, 'org1', { tournamentId: lt });
   const grp = (await db.doc(`scoreGroups/${lt}_g0`).get()).data();
   check('a score group is created at close', !!grp && grp.status === 'live' && grp.entryIds.length === 4, grp && { n: grp.entryIds.length, s: grp.status });
-  check('default scorekeeper is the first seed', grp.scorekeeperUid === 'p4', grp.scorekeeperUid); // p4 (4.2) seeds 1st
-  // A non-keeper cannot enter scores.
+  check('a group member is the default scorekeeper', ['p1', 'p2', 'p3', 'p4'].includes(grp.scorekeeperUid), grp.scorekeeperUid);
+  // A non-keeper cannot enter scores (pick whoever isn't the current keeper).
+  const nonK = ['p1', 'p2', 'p3', 'p4'].find((u) => u !== grp.scorekeeperUid);
   let nonKeeper = false;
-  try { await call(fns.saveStrokeHole, 'p1', { groupId: `${lt}_g0`, hole: 1, scores: { [le.p1]: 4 } }); } catch { nonKeeper = true; }
+  try { await call(fns.saveStrokeHole, nonK, { groupId: `${lt}_g0`, hole: 1, scores: { [le[nonK]]: 4 } }); } catch { nonKeeper = true; }
   check('a non-scorekeeper cannot enter scores', nonKeeper);
   // p1 claims scoring, then enters three holes for the whole group.
   await call(fns.claimScorekeeper, 'p1', { scope: 'group', id: `${lt}_g0` });
@@ -492,7 +493,7 @@ async function main() {
   await call(fns.submitAvailability, 'p1', { matchId: `${lm}_r1_m0`, dates: [lmday, lmday + 86400000, lmday + 2 * 86400000] });
   await call(fns.submitAvailability, 'p2', { matchId: `${lm}_r1_m0`, dates: [lmday, lmday + 86400000, lmday + 2 * 86400000] });
   await call(fns.setAgreedTime, 'p1', { matchId: `${lm}_r1_m0`, agreedTime: lmday, placeId: null, bookedBy: 'p1' });
-  check('booker is the default match scorekeeper', (await db.doc(`matches/${lm}_r1_m0`).get()).data().scorekeeperUid === 'p1');
+  check('a player is the default match scorekeeper', ['p1', 'p2'].includes((await db.doc(`matches/${lm}_r1_m0`).get()).data().scorekeeperUid));
   // p1 (seed 1 = entryIds[0]) wins each of 5 holes; closes out 5&4 over 9.
   for (let h = 1; h <= 5; h++) {
     await call(fns.saveMatchHole, 'p1', { matchId: `${lm}_r1_m0`, hole: h, scores: { [lme1]: 4, [lme2]: 6 } });
@@ -506,6 +507,35 @@ async function main() {
   // The opponent confirms → match completes.
   await call(fns.confirmResult, 'p2', { matchId: `${lm}_r1_m0` });
   check('confirmed live match completes', (await db.doc(`matches/${lm}_r1_m0`).get()).data().status === 'complete');
+
+  // ================= FLOW Q — scorekeeper default (most played) + paper totals =
+  console.log('\nFLOW Q — default scorekeeper = most rounds played; paper totals fallback');
+  await makeUser('mkA', 'Able, N.', 10.0);
+  await makeUser('mkB', 'Baker, V.', 10.0);
+  // mkB has played 3 rounds on the app; mkA none → mkB should default as keeper.
+  for (let i = 0; i < 3; i++) {
+    await db.collection('reputationEvents').add({ userId: 'mkB', type: 'played', matchId: `seed_${i}`, timestamp: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 365 * 86400000) });
+  }
+  const qEvt = await call(fns.createInstantEvent, 'mkA', {
+    templateId: 'liveFoursome', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const qt = qEvt.tournamentId;
+  const qa = (await call(fns.enterTournament, 'mkA', { tournamentId: qt })).entryId;
+  const qb = (await call(fns.enterTournament, 'mkB', { tournamentId: qt })).entryId;
+  await call(fns.closeRegistration, 'org1', { tournamentId: qt });
+  const qgrp = (await db.doc(`scoreGroups/${qt}_g0`).get()).data();
+  check('default scorekeeper is the most-played member (mkB, not mkA)', qgrp.scorekeeperUid === 'mkB', qgrp.scorekeeperUid);
+  // Paper fallback: the keeper posts final totals instead of hole-by-hole.
+  let paperNonKeeper = false;
+  try { await call(fns.postGroupTotals, 'mkA', { groupId: `${qt}_g0`, totals: { [qa]: 44 } }); } catch { paperNonKeeper = true; }
+  check('only the scorekeeper can post paper totals', paperNonKeeper);
+  await call(fns.postGroupTotals, 'mkB', { groupId: `${qt}_g0`, totals: { [qa]: 44, [qb]: 40 } });
+  const qacard = (await db.doc(`scorecards/${qt}_${qa}_1`).get()).data();
+  check('paper totals post gross and await confirmation', qacard.gross === 44 && qacard.status === 'awaitingConfirmation', { g: qacard.gross, s: qacard.status });
+  check('group closes after posting totals', (await db.doc(`scoreGroups/${qt}_g0`).get()).data().status === 'closed');
+  await call(fns.confirmRoundScore, 'mkA', { scorecardId: `${qt}_${qb}_1` });
+  await call(fns.confirmRoundScore, 'mkB', { scorecardId: `${qt}_${qa}_1` });
+  check('paper-scored event completes (mkB 40 beats mkA 44)', (await db.doc(`tournaments/${qt}`).get()).data().status === 'complete');
 
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');

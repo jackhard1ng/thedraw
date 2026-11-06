@@ -4,7 +4,7 @@
  * an unconfirmed result auto-confirms after 48h via the scheduler (§P1).
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { db, FieldValue, Timestamp, requireAuth, requireActive, writeReputation } from './shared';
+import { db, FieldValue, Timestamp, requireAuth, requireActive, writeReputation, mostPlayed } from './shared';
 import { isValidMargin, loserOf } from './engine/scoring';
 import { EXTENSION_DAYS, RESULT_CONFIRM_HOURS, MIN_DATES } from './engine/scheduling';
 import { advanceWinner } from './lib/matchgen';
@@ -107,14 +107,25 @@ export const setAgreedTime = onCall<{
   if (!match) throw new HttpsError('not-found', 'Match not found.');
   const actor = await actorEntry(match, uid);
   if (!actor) throw new HttpsError('permission-denied', 'You are not in this match.');
+  // Default scorekeeper = the player with more rounds played on the app (never
+  // handicap); one-tap claimable by the other. Only set it once.
+  let defaultKeeper = match.scorekeeperUid ?? null;
+  if (!defaultKeeper) {
+    const captains: string[] = [];
+    for (const eid of match.entryIds) {
+      if (!eid) continue;
+      const e = (await db.doc(`entries/${eid}`).get()).data() as { captainId?: string; userIds?: string[] } | undefined;
+      const cap = e?.captainId ?? e?.userIds?.[0];
+      if (cap) captains.push(cap);
+    }
+    defaultKeeper = (await mostPlayed(captains)) ?? req.data.bookedBy ?? uid;
+  }
   await ref.update({
     'scheduling.agreedTime': Timestamp.fromMillis(req.data.agreedTime),
     'scheduling.placeId': req.data.placeId,
     'scheduling.bookedBy': req.data.bookedBy,
     status: 'scheduled',
-    // The booker keeps score by default — live hole entry opens to them, and
-    // either player can claim it (claimScorekeeper). Don't overwrite a claim.
-    ...(match.scorekeeperUid ? {} : { scorekeeperUid: req.data.bookedBy ?? uid }),
+    ...(match.scorekeeperUid ? {} : { scorekeeperUid: defaultKeeper }),
   });
   // Locking a time commits BOTH players — the other side gets a text, so a
   // unilateral lock-in is never a surprise discovered at the course.

@@ -171,3 +171,28 @@ export async function writeReputation(
     expiresAt: Timestamp.fromMillis(now + 365 * 86_400_000),
   });
 }
+
+/**
+ * Pick the default scorekeeper from a set of users: the one with the most rounds
+ * PLAYED on the app (experience with the flow), ties broken by list order. Never
+ * handicap — keeping score is a reliability job, not a skill one. Any player can
+ * still override with one tap (claimScorekeeper).
+ */
+export async function mostPlayed(uids: string[]): Promise<string | null> {
+  const list = uids.filter(Boolean);
+  if (list.length === 0) return null;
+  let best = list[0];
+  let bestN = -1;
+  for (const u of list) {
+    const snap = await db
+      .collection('reputationEvents')
+      .where('userId', '==', u)
+      .where('type', '==', 'played')
+      .get();
+    if (snap.size > bestN) {
+      bestN = snap.size;
+      best = u;
+    }
+  }
+  return best;
+}

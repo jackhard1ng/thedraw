@@ -153,6 +153,10 @@ export const finalizeGroup = httpsCallable<
   { groupId: string },
   { ok: boolean }
 >(functions, 'finalizeGroup');
+export const postGroupTotals = httpsCallable<
+  { groupId: string; totals: Record<string, number> },
+  { ok: boolean }
+>(functions, 'postGroupTotals');
 export const saveMatchHole = httpsCallable<
   { matchId: string; hole: number; scores: Record<string, number> },
   { ok: boolean }

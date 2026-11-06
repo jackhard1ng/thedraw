@@ -131,7 +131,54 @@ export const finalizeGroup = onCall<{ groupId: string }>(async (req) => {
   return { ok: true };
 });
 
-// ---- match play: live holes + finalize ------------------------------------
+/**
+ * Paper fallback (stroke): the scorekeeper enters each player's FINAL total from
+ * a paper card instead of hole-by-hole — for a dead phone, bad signal, or a
+ * group that just prefers paper. Same destination as finalizeGroup: each card
+ * goes to awaitingConfirmation and the normal confirm/dispute flow takes over.
+ */
+export const postGroupTotals = onCall<{ groupId: string; totals: Record<string, number> }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  await requireActive(uid);
+  const gRef = db.doc(`scoreGroups/${req.data.groupId}`);
+  const g = (await gRef.get()).data() as
+    | { tournamentId: string; round: number; entryIds: string[]; scorekeeperUid: string; status: string }
+    | undefined;
+  if (!g) throw new HttpsError('not-found', 'Group not found.');
+  if (g.scorekeeperUid !== uid) throw new HttpsError('permission-denied', 'Only the group scorekeeper can post totals.');
+  if (g.status !== 'live') return { ok: true }; // idempotent
+  const deadline = Timestamp.fromMillis(Date.now() + RESULT_CONFIRM_HOURS * 3_600_000);
+  for (const entryId of g.entryIds) {
+    const gross = req.data.totals?.[entryId];
+    if (gross == null) continue; // allow partial posting (someone picked up)
+    if (!Number.isInteger(gross) || gross <= 0 || gross > 200) {
+      throw new HttpsError('invalid-argument', 'Each total must be a whole number of strokes.');
+    }
+    const cardRef = db.doc(`scorecards/${g.tournamentId}_${entryId}_${g.round}`);
+    const card = (await cardRef.get()).data() as { courseHandicap: number | null; status: string } | undefined;
+    if (!card) continue;
+    if (card.status !== 'awaitingResult' && card.status !== 'awaitingConfirmation') continue;
+    await cardRef.update({
+      gross,
+      net: card.courseHandicap != null ? gross - card.courseHandicap : null,
+      submittedBy: uid,
+      confirmDeadline: deadline,
+      status: 'awaitingConfirmation',
+    });
+    const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
+    for (const u of e?.userIds ?? []) {
+      if (u === uid) continue;
+      await notify({
+        userId: u,
+        title: 'Confirm your card',
+        body: `The scorekeeper posted your total (${gross}) from the paper card. Confirm or dispute it, or it auto-confirms in 48h.`,
+        link: `/tournaments/${g.tournamentId}/scorecard`,
+      });
+    }
+  }
+  await gRef.update({ status: 'closed' });
+  return { ok: true };
+});
 export const saveMatchHole = onCall<{ matchId: string; hole: number; scores: Record<string, number> }>(async (req) => {
   const uid = requireAuth(req.auth);
   await requireActive(uid);
