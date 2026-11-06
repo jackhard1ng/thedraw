@@ -15,6 +15,7 @@ import {
   verifyHandicap,
   adjustTourIndex,
   resolveDispute,
+  resolveScoreDispute,
   restrictUser,
 } from '@/lib/callable';
 import {
@@ -373,6 +374,107 @@ export function VerifyHandicapPanel() {
           </div>
         )}
       </div>
+
+      <ScoreDisputeQueue marketId={marketId} />
     </div>
+  );
+}
+
+function ScoreDisputeQueue({ marketId }: { marketId: string }) {
+  const [rows, setRows] = useState<
+    { reportId: string; scorecardId: string; reason: string; context: string | null }[] | null
+  >(null);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'reports'),
+      where('marketId', '==', marketId),
+      where('targetType', '==', 'scorecard'),
+      where('status', '==', 'open'),
+    );
+    return onSnapshot(
+      q,
+      (snap) =>
+        setRows(
+          snap.docs.map((d) => {
+            const r = d.data() as { targetId: string; reason: string; context: string | null };
+            return { reportId: d.id, scorecardId: r.targetId, reason: r.reason, context: r.context ?? null };
+          }),
+        ),
+      () => setRows([]),
+    );
+  }, [marketId]);
+  return (
+    <div className="mt-8">
+      <SectionHeader>
+        Disputed scorecards {rows && <Num className="text-tournament">{rows.length}</Num>}
+      </SectionHeader>
+      {rows === null ? (
+        <p className="text-sm text-ink-faint">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-ink-faint">No scorecard disputes to rule.</p>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((r) => (
+            <ScoreDisputeCard key={r.reportId} scorecardId={r.scorecardId} reason={r.reason} context={r.context} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreDisputeCard({
+  scorecardId,
+  reason,
+  context,
+}: {
+  scorecardId: string;
+  reason: string;
+  context: string | null;
+}) {
+  const [gross, setGross] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  if (done) return null;
+  return (
+    <Card className="p-4">
+      <p className="text-sm text-ink">{reason}</p>
+      {context && <p className="mt-1 text-xs text-ink-faint">{context}</p>}
+      <div className="mt-3 flex items-end gap-2">
+        <Field label="Ruled gross">
+          <input
+            className="field-input tnum w-24"
+            inputMode="numeric"
+            value={gross}
+            onChange={(e) => setGross(e.target.value)}
+          />
+        </Field>
+        <Button
+          variant="primary"
+          disabled={busy || !gross.trim()}
+          onClick={async () => {
+            const g = Number(gross);
+            if (!Number.isInteger(g) || g <= 0) {
+              setMsg('Enter a whole-number gross.');
+              return;
+            }
+            setBusy(true);
+            setMsg(null);
+            try {
+              await resolveScoreDispute({ scorecardId, gross: g });
+              setDone(true);
+            } catch (e) {
+              setMsg((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Ruling…' : 'Rule card'}
+        </Button>
+      </div>
+      {msg && <p className="mt-2 text-sm text-tournament">{msg}</p>}
+    </Card>
   );
 }

@@ -441,3 +441,87 @@ export const confirmRoundScore = onCall<{ scorecardId: string }>(async (req) => 
   await maybeCompleteTournament(sc.tournamentId);
   return { ok: true };
 });
+
+/**
+ * Dispute a playing partner's submitted stroke-play card BEFORE it locks —
+ * parity with the match-play dispute, and the gap that let a bad card ride to
+ * auto-confirm on money events. Setting the card to `disputed` holds the whole
+ * event: completeStrokePlay counts only `complete` + `dnf` as settled, so a
+ * disputed card keeps the field short and NO payout moves until an organizer
+ * rules (resolveScoreDispute). Neither sweep touches a disputed card.
+ */
+export const disputeRoundScore = onCall<{ scorecardId: string; note: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  await requireActive(uid);
+  const ref = db.doc(`scorecards/${req.data.scorecardId}`);
+  const sc = (await ref.get()).data() as
+    | { tournamentId: string; entryId: string; userId: string; gross: number; status: string }
+    | undefined;
+  if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
+  if (sc.status !== 'awaitingConfirmation') {
+    throw new HttpsError('failed-precondition', 'Only a submitted card still awaiting confirmation can be disputed.');
+  }
+  // The disputer must be a playing partner in the field — never the scorer's
+  // own entry (the same marker rule confirmation uses).
+  const mine = await db.collection('entries').where('tournamentId', '==', sc.tournamentId).where('userIds', 'array-contains', uid).limit(1).get();
+  if (mine.empty) throw new HttpsError('permission-denied', 'Only players in this event can dispute a card.');
+  if (mine.docs[0].id === sc.entryId) throw new HttpsError('failed-precondition', 'You can’t dispute your own side’s card.');
+
+  const t = (await db.doc(`tournaments/${sc.tournamentId}`).get()).data() as
+    | { marketId: string; name: string; entryFeeCents: number }
+    | undefined;
+  const isMoney = (t?.entryFeeCents ?? 0) > 0;
+
+  await ref.update({
+    status: 'disputed',
+    disputedBy: uid,
+    disputeNote: String(req.data.note).slice(0, 500),
+    disputedAt: Timestamp.now(),
+  });
+
+  // The scorer's side hears it's contested and held; the disputer gets an ack.
+  const scorerEntry = (await db.doc(`entries/${sc.entryId}`).get()).data() as { userIds: string[] } | undefined;
+  for (const u of scorerEntry?.userIds ?? []) {
+    await notify({
+      userId: u,
+      title: 'Scorecard disputed',
+      body: isMoney
+        ? 'A playing partner flagged your card. Payout for this event is on hold until an organizer rules.'
+        : 'A playing partner flagged your card. An organizer will review it.',
+      deadlineCritical: isMoney,
+      link: `/tournaments/${sc.tournamentId}/leaderboard`,
+    });
+  }
+  await notify({
+    userId: uid,
+    title: 'Dispute filed',
+    body: 'Your flag went to the organizer with the card attached. The result is on hold until they rule.',
+    link: `/tournaments/${sc.tournamentId}/leaderboard`,
+  });
+
+  // Credibility snapshot for the organizer — evidence, never an auto-verdict.
+  const snapshot: string[] = [];
+  for (const [label, userId] of [['scorer', sc.userId], ['disputing', uid]] as const) {
+    const u = (await db.doc(`users/${userId}`).get()).data() as
+      | { displayName: string; createdAt: Timestamp; handicap?: { source: string; verifiedAt: Timestamp | null } }
+      | undefined;
+    if (!u) continue;
+    const played = await db.collection('reputationEvents').where('userId', '==', userId).where('type', '==', 'played').get();
+    const months = Math.max(0, Math.round((Date.now() - u.createdAt.toMillis()) / (30 * 86_400_000)));
+    const hcpTag = u.handicap?.source === 'ghin' && u.handicap.verifiedAt ? 'GHIN-verified' : 'self/linked';
+    snapshot.push(`${u.displayName} (${label}): ${played.size} played, member ${months} mo, ${hcpTag}`);
+  }
+
+  // Route to the market organizer — parity with match disputes.
+  await db.collection('reports').add({
+    reportedBy: uid,
+    targetType: 'scorecard',
+    targetId: req.data.scorecardId,
+    marketId: t?.marketId ?? '',
+    reason: `Disputed ${isMoney ? 'MONEY ' : ''}scorecard (reported gross ${sc.gross}): ${String(req.data.note).slice(0, 500)}`,
+    context: snapshot.join(' · ') || null,
+    createdAt: FieldValue.serverTimestamp(),
+    status: 'open',
+  });
+  return { ok: true };
+});

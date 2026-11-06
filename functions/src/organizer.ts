@@ -6,6 +6,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { db, FieldValue, Timestamp, requireAuth, requireOrganizer, getUser } from './shared';
 import { finalizeMatch } from './matches';
+import { maybeCompleteTournament } from './completion';
 import { isValidMargin, loserOf } from './engine/scoring';
 import { notify } from './lib/notify';
 
@@ -109,6 +110,61 @@ export const resolveDispute = onCall<{ matchId: string; winnerEntryId: string; m
       });
     }
   }
+  return { ok: true };
+});
+
+/**
+ * Rule a disputed stroke-play scorecard (§5) — the stroke-play counterpart to
+ * resolveDispute. The organizer sets the authoritative gross; net is recomputed
+ * from the handicap frozen at the draw. Marking the card `complete` releases the
+ * hold the dispute placed on the event, so maybeCompleteTournament can finish
+ * and payouts proceed.
+ */
+export const resolveScoreDispute = onCall<{ scorecardId: string; gross: number }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const ref = db.doc(`scorecards/${req.data.scorecardId}`);
+  const sc = (await ref.get()).data() as
+    | { tournamentId: string; entryId: string; userId: string; courseHandicap: number | null; status: string; disputedBy?: string }
+    | undefined;
+  if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
+  if (sc.status !== 'disputed') throw new HttpsError('failed-precondition', 'That card is not under dispute.');
+  const t = (await db.doc(`tournaments/${sc.tournamentId}`).get()).data() as { marketId: string; name: string } | undefined;
+  await requireOrganizer(uid, t?.marketId ?? '');
+  // An organizer may compete in the market's events, but never referee one they
+  // are playing in.
+  const mine = await db.collection('entries').where('tournamentId', '==', sc.tournamentId).where('userIds', 'array-contains', uid).limit(1).get();
+  if (!mine.empty) {
+    throw new HttpsError('permission-denied', 'You are competing in this event — a different organizer must rule.');
+  }
+  if (!Number.isInteger(req.data.gross) || req.data.gross <= 0) {
+    throw new HttpsError('invalid-argument', 'Enter the ruled gross score as a whole number.');
+  }
+  const net = sc.courseHandicap != null ? req.data.gross - sc.courseHandicap : null;
+  await ref.update({
+    gross: req.data.gross,
+    net,
+    status: 'complete',
+    confirmedBy: uid,
+    confirmedAt: Timestamp.now(),
+    resolvedByOrganizer: true,
+  });
+  // Close open dispute reports for this card.
+  const reports = await db.collection('reports').where('targetType', '==', 'scorecard').where('targetId', '==', req.data.scorecardId).where('status', '==', 'open').get();
+  await Promise.all(reports.docs.map((d) => d.ref.update({ status: 'resolved' })));
+  // Tell the scorer's side and the disputer the card was ruled.
+  const scorerEntry = (await db.doc(`entries/${sc.entryId}`).get()).data() as { userIds: string[] } | undefined;
+  const audience = new Set<string>([...(scorerEntry?.userIds ?? []), ...(sc.disputedBy ? [sc.disputedBy] : [])]);
+  for (const u of audience) {
+    await notify({
+      userId: u,
+      title: 'Dispute ruled',
+      body: `An organizer ruled the disputed card at gross ${req.data.gross}. ${t?.name ?? 'The event'} can now settle.`,
+      deadlineCritical: true,
+      link: `/tournaments/${sc.tournamentId}/leaderboard`,
+    });
+  }
+  // Releasing the hold may complete the event and move payouts.
+  await maybeCompleteTournament(sc.tournamentId);
   return { ok: true };
 });
 

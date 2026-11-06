@@ -135,6 +135,10 @@ export const confirmRoundScore = httpsCallable<
   { scorecardId: string },
   { ok: boolean }
 >(functions, 'confirmRoundScore');
+export const disputeRoundScore = httpsCallable<
+  { scorecardId: string; note: string },
+  { ok: boolean }
+>(functions, 'disputeRoundScore');
 
 // ---- Green fees + cancellation ladder (§5 — never player-to-player debt) ---
 export const collectGreenFees = httpsCallable<
@@ -224,6 +228,10 @@ export const resolveDispute = httpsCallable<
   { matchId: string; winnerEntryId: string; margin: string },
   { ok: boolean }
 >(functions, 'resolveDispute');
+export const resolveScoreDispute = httpsCallable<
+  { scorecardId: string; gross: number },
+  { ok: boolean }
+>(functions, 'resolveScoreDispute');
 export const restrictUser = httpsCallable<
   { userId: string; status: 'active' | 'restricted' | 'banned' },
   { ok: boolean }

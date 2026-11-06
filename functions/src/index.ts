@@ -43,12 +43,14 @@ export {
   disputeResult,
   submitRoundScore,
   confirmRoundScore,
+  disputeRoundScore,
 } from './matches';
 
 export {
   verifyHandicap,
   adjustTourIndex,
   resolveDispute,
+  resolveScoreDispute,
   restrictUser,
   reviewEventRequest,
 } from './organizer';

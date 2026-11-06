@@ -12,13 +12,15 @@ import { useMemo, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button, Card, Num, Rule } from '@/components/ui';
 import { relativeDays } from '@/lib/format';
-import { submitRoundScore, confirmRoundScore } from '@/lib/callable';
+import { submitRoundScore, confirmRoundScore, disputeRoundScore } from '@/lib/callable';
 import { useTournamentEntries, useTournamentScorecards } from '@/features/tournaments/useTournaments';
 
 const CARD_STATUS_LABEL: Record<string, string> = {
   awaitingResult: 'Waiting on your score',
   awaitingConfirmation: 'Submitted — awaiting a partner’s confirmation',
   complete: 'Official',
+  disputed: 'Disputed — on hold until an organizer rules',
+  dnf: 'Did not finish',
 };
 
 export function StrokePlayScoreCard({
@@ -203,36 +205,82 @@ function ConfirmRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [disputing, setDisputing] = useState(false);
+  const [note, setNote] = useState('');
   return (
-    <Card className="flex items-center justify-between p-3">
-      <div className="text-sm">
-        <span className="text-ink">
-          {playerName} — R<Num>{round}</Num> · gross <Num>{gross}</Num>
-        </span>
-        {deadline && (
-          <span className="ml-2 text-xs text-ink-faint">
-            auto-confirms {relativeDays(new Date(deadline))}
+    <Card className="p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm">
+          <span className="text-ink">
+            {playerName} — R<Num>{round}</Num> · gross <Num>{gross}</Num>
           </span>
-        )}
-        {error && <p className="text-xs text-tournament">{error}</p>}
+          {deadline && (
+            <span className="ml-2 text-xs text-ink-faint">
+              auto-confirms {relativeDays(new Date(deadline))}
+            </span>
+          )}
+          {error && <p className="text-xs text-tournament">{error}</p>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className="text-xs text-ink-faint underline underline-offset-2"
+            onClick={() => setDisputing((d) => !d)}
+          >
+            {disputing ? 'Cancel' : 'Dispute'}
+          </button>
+          <Button
+            variant="ghost"
+            disabled={busy || disputing}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                await confirmRoundScore({ scorecardId });
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Confirm
+          </Button>
+        </div>
       </div>
-      <Button
-        variant="ghost"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError(null);
-          try {
-            await confirmRoundScore({ scorecardId });
-          } catch (e) {
-            setError((e as Error).message);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        Confirm
-      </Button>
+      {disputing && (
+        <div className="mt-3 space-y-2 border-t border-rule pt-3">
+          <p className="text-xs text-ink-faint">
+            Only flag a card you believe is wrong — it holds the event (and any
+            payout) until an organizer rules. Say what's off.
+          </p>
+          <input
+            className="field-input text-sm"
+            placeholder="e.g. I had him at 6 on the 9th, not 5"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <Button
+            variant="primary"
+            className="w-full"
+            disabled={busy || !note.trim()}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                await disputeRoundScore({ scorecardId, note: note.trim() });
+                setDisputing(false);
+                setNote('');
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? 'Filing…' : 'Flag this card for review'}
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }

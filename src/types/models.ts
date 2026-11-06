@@ -417,7 +417,15 @@ export interface Scorecard {
   confirmedBy: string | null;
   confirmDeadline: Ts | null;
   scorecardPhotoUrl: string | null;
-  status: 'awaitingResult' | 'awaitingConfirmation' | 'complete' | 'disputed';
+  // 'dnf' = swept after the round deadline with no score; 'disputed' = a partner
+  // flagged the card, which holds the whole event's payout until an organizer
+  // rules (resolveScoreDispute).
+  status: 'awaitingResult' | 'awaitingConfirmation' | 'complete' | 'dnf' | 'disputed';
+  dueAt?: Ts | null; // round deadline for the DNF sweep
+  disputedBy?: string | null;
+  disputeNote?: string | null;
+  disputedAt?: Ts | null;
+  resolvedByOrganizer?: boolean;
 }
 
 // ---------------------------------------------------------------------------

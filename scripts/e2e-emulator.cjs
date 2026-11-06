@@ -383,6 +383,58 @@ async function main() {
   // pool: 2×2000=4000; admin=max(2×200,1000)=1000; winner nets 3000.
   check('heads-up winner nets pot minus $10 floor (3000)', huPayouts.length === 1 && huPayouts[0].amountCents === 3000 && huPayouts[0].toUserId === 'p1', huPayouts.map((r) => [r.toUserId, r.amountCents]));
 
+  // ================= FLOW N — stroke-play dispute holds payout =============
+  console.log('\nFLOW N — stroke-play dispute: holds the event, organizer rules, then pays');
+  const dt = 'disputeTest1';
+  await db.doc(`tournaments/${dt}`).set({
+    marketId: 'kc', formatId: 'grossFoursome', createdBy: 'org1', name: 'Dispute Test',
+    description: '', entryFeeCents: 2000, adminFeePercent: 10,
+    payoutTable: [{ division: 'gross', place: 1, sharePercent: 100 }],
+    divisionMode: 'grossOnly', doubleDipRule: 'onePrizePerPlayer', prizeType: 'cashPurse',
+    sponsoredPrizes: null, minEntries: 2, maxEntries: 2,
+    registrationOpens: Timestamp.now(), registrationCloses: Timestamp.now(),
+    eligibility: {}, structure: 'singleRound', roundDeadlineDays: 1,
+    status: 'inProgress', entryIds: ['nd1', 'nd2'],
+  });
+  await db.doc('entries/nd1').set({ tournamentId: dt, userIds: ['p1'], teamId: null, teamName: null, captainId: 'p1', combinedIndex: 7, flight: null, seed: 1, paymentIntentId: 'pi', paymentStatus: 'captured', status: 'active' });
+  await db.doc('entries/nd2').set({ tournamentId: dt, userIds: ['p2'], teamId: null, teamName: null, captainId: 'p2', combinedIndex: 12, flight: null, seed: 2, paymentIntentId: 'pi', paymentStatus: 'captured', status: 'active' });
+  const mkOpenCard = (eid, uid) => db.doc(`scorecards/${dt}_${eid}_1`).set({
+    tournamentId: dt, entryId: eid, userId: uid, round: 1, placeId: 'x', gross: 0,
+    courseHandicap: null, net: null, holes: null, submittedBy: null, confirmedBy: null,
+    confirmDeadline: null, scorecardPhotoUrl: null, status: 'awaitingResult',
+    dueAt: Timestamp.fromMillis(Date.now() + 86400000),
+  });
+  await mkOpenCard('nd1', 'p1');
+  await mkOpenCard('nd2', 'p2');
+
+  // Both submit their own totals.
+  await call(fns.submitRoundScore, 'p1', { tournamentId: dt, round: 1, gross: 70 });
+  await call(fns.submitRoundScore, 'p2', { tournamentId: dt, round: 1, gross: 75 });
+  // p2 DISPUTES p1's card instead of confirming it.
+  await call(fns.disputeRoundScore, 'p2', { scorecardId: `${dt}_nd1_1`, note: 'I had him for an extra stroke on 7.' });
+  check('disputed card is held (status disputed)', (await db.doc(`scorecards/${dt}_nd1_1`).get()).data().status === 'disputed');
+  const dReport = await db.collection('reports').where('targetType', '==', 'scorecard').where('targetId', '==', `${dt}_nd1_1`).where('status', '==', 'open').get();
+  check('dispute routes an open report to the organizer', dReport.size === 1);
+  // p1 can confirm p2's card; that alone must NOT complete the event.
+  await call(fns.confirmRoundScore, 'p1', { scorecardId: `${dt}_nd2_1` });
+  const held = (await db.doc(`tournaments/${dt}`).get()).data();
+  check('event stays inProgress while a card is disputed (payout held)', held.status === 'inProgress', held.status);
+  const heldPay = (await db.collection('ledger').where('tournamentId', '==', dt).get()).docs.filter((d) => d.data().type === 'payout');
+  check('no payout moves while disputed', heldPay.length === 0, heldPay.length);
+  // A competitor cannot rule it.
+  let compRule = false;
+  try { await call(fns.resolveScoreDispute, 'p1', { scorecardId: `${dt}_nd1_1`, gross: 70 }); } catch { compRule = true; }
+  check('a competing player cannot rule the dispute', compRule);
+  // Organizer rules the card → hold releases → payout proceeds.
+  await call(fns.resolveScoreDispute, 'org1', { scorecardId: `${dt}_nd1_1`, gross: 71 });
+  check('ruled card is complete', (await db.doc(`scorecards/${dt}_nd1_1`).get()).data().status === 'complete');
+  check('dispute report closed', (await db.collection('reports').where('targetId', '==', `${dt}_nd1_1`).where('status', '==', 'open').get()).empty);
+  const dDone = (await db.doc(`tournaments/${dt}`).get()).data();
+  check('event completes after the ruling', dDone.status === 'complete', dDone.status);
+  const dPay = (await db.collection('ledger').where('tournamentId', '==', dt).get()).docs.map((d) => d.data()).filter((r) => r.type === 'payout');
+  // p1 ruled 71 beats p2's 75 → winner-take-all, pool 4000 − $10 floor = 3000.
+  check('winner (p1) paid pot minus floor after ruling', dPay.length === 1 && dPay[0].toUserId === 'p1' && dPay[0].amountCents === 3000, dPay.map((r) => [r.toUserId, r.amountCents]));
+
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');
   const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {
