@@ -565,6 +565,46 @@ async function main() {
   await call(fns.markTeeBooked, 'uu1', { matchId: `${rt}_r1_m0`, booked: false });
   check('booking can be undone', !(await db.doc(`matches/${rt}_r1_m0`).get()).data().teeBooked);
 
+  // ================= FLOW S — opponent view: recent form, H2H, index updates ==
+  console.log('\nFLOW S — recent form rows, head-to-head, keeping an index current');
+  // Live 1v1 from FLOW P: p1 beat p2 5&4 (net).
+  const fp1 = (await db.doc(`playerResults/${lm}_p1`).get()).data();
+  const fp2 = (await db.doc(`playerResults/${lm}_p2`).get()).data();
+  check('heads-up result row: winner reads "Won 5&4" vs the opponent', fp1 && fp1.outcome === 'won' && fp1.label === 'Won 5&4' && fp1.opponentUserIds[0] === 'p2', fp1 && fp1.label);
+  check('heads-up result row carries the opponent\'s frozen index', fp1 && fp1.opponentIndexes[0] === 12.4, fp1 && fp1.opponentIndexes);
+  check('loser row reads "Lost 5&4"', fp2 && fp2.outcome === 'lost' && fp2.label === 'Lost 5&4', fp2 && fp2.label);
+  // Live stroke group from FLOW O: p4 12, p1 13, p2 16, p3 16.
+  const sp4 = (await db.doc(`playerResults/${lt}_p4`).get()).data();
+  const sp2 = (await db.doc(`playerResults/${lt}_p2`).get()).data();
+  check('stroke row: low gross reads "1st of 4" with the score', sp4 && sp4.label === '1st of 4' && sp4.gross === 12 && sp4.outcome === 'won', sp4 && sp4.label);
+  check('stroke row: shared score reads "T3 of 4"', sp2 && sp2.label === 'T3 of 4' && sp2.outcome === 'placed', sp2 && sp2.label);
+  // Paid heads-up from FLOW M3: stake and winnings land on the row.
+  const mp1 = (await db.doc(`playerResults/headsUpPaid1_p1`).get()).data();
+  check('money row shows the stake and what they won', mp1 && mp1.perPlayerCents === 2000 && mp1.wonCents === 3000, mp1 && [mp1.perPlayerCents, mp1.wonCents]);
+  // Head-to-head: p1's history against p2.
+  const h2h = await db.collection('playerResults').where('userId', '==', 'p1').where('opponentUserIds', 'array-contains', 'p2').get();
+  check('head-to-head query finds their matches against each other', h2h.size >= 2 && h2h.docs.every((d) => d.data().kind === 'match'), h2h.size);
+
+  // Keeping an index current.
+  await makeUser('ix1', 'Ixa, R.', 14.0); // makeUser = GHIN-verified
+  await makeUser('ix2', 'Ixb, S.', 9.0);
+  await makeUser('ix3', 'Ixc, T.', 20.0);
+  await db.doc('users/ix3').update({ 'handicap.source': 'self', 'handicap.verifiedAt': null, 'handicap.verifiedBy': null });
+  const up1 = await call(fns.updateMyIndex, 'ix1', { index: 16.04 });
+  const ix1 = (await db.doc('users/ix1').get()).data();
+  check('raising a verified index sends the badge back to pending', up1.reverify === true && ix1.handicap.index === 16 && ix1.handicap.verifiedAt === null && ix1.handicap.source === 'ghin', ix1.handicap);
+  const req1 = await db.collection('verificationRequests').where('userId', '==', 'ix1').where('status', '==', 'open').get();
+  check('...and files a re-verification request', req1.size === 1);
+  const up2 = await call(fns.updateMyIndex, 'ix2', { index: 8.2 });
+  const ix2 = (await db.doc('users/ix2').get()).data();
+  check('lowering a verified index keeps the badge', up2.reverify === false && ix2.handicap.index === 8.2 && !!ix2.handicap.verifiedAt);
+  const up3 = await call(fns.updateMyIndex, 'ix3', { index: 18.5 });
+  const req3 = await db.collection('verificationRequests').where('userId', '==', 'ix3').get();
+  check('a self-declared index just updates (no request)', up3.reverify === false && req3.empty && !!(await db.doc('users/ix3').get()).data().handicap.updatedAt);
+  let badMyIndex = false;
+  try { await call(fns.updateMyIndex, 'ix3', { index: 60 }); } catch { badMyIndex = true; }
+  check('an out-of-range index is rejected', badMyIndex);
+
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');
   const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {

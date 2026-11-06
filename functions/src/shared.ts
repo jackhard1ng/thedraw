@@ -30,6 +30,7 @@ export interface UserDoc {
     index: number;
     source: 'ghin' | 'thirdParty' | 'self';
     ghinNumber?: string | null;
+    sourceUrl?: string | null;
     verifiedAt: Timestamp | null;
   };
   tourIndex?: number | null; // committee competition handicap (overrides at entry)

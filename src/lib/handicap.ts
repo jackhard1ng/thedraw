@@ -17,17 +17,19 @@ export type Freshness = 'fresh' | 'stale' | 'expired';
  * leaderboards); the tier is for scanning — "he's a B player" at a glance.
  */
 export interface Tier {
-  key: 'champ' | 'a' | 'b' | 'c' | 'd';
+  key: 'a' | 'b' | 'c' | 'd';
   label: string;
   range: string;
 }
 
+// Four broad buckets — roughly 0–8 / 9–15 / 16–24 / 25+. Indexes are decimals,
+// so the printed ranges are exact (an 8.4 is a B, not an A). Plus handicaps and
+// scratch sit in A.
 const TIERS: (Tier & { max: number })[] = [
-  { key: 'champ', label: 'Championship', range: '5.0 & under', max: 5 },
-  { key: 'a', label: 'A', range: '5.1–10.0', max: 10 },
-  { key: 'b', label: 'B', range: '10.1–15.0', max: 15 },
-  { key: 'c', label: 'C', range: '15.1–20.0', max: 20 },
-  { key: 'd', label: 'D', range: '20.1+', max: Infinity },
+  { key: 'a', label: 'A', range: '8.0 & under', max: 8 },
+  { key: 'b', label: 'B', range: '8.1–15.0', max: 15 },
+  { key: 'c', label: 'C', range: '15.1–24.0', max: 24 },
+  { key: 'd', label: 'D', range: '24.1+', max: Infinity },
 ];
 
 export function tierFor(index: number): Tier {

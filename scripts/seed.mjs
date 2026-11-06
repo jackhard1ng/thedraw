@@ -179,13 +179,14 @@ const TEMPLATES = [
     active: true,
   },
   {
-    // Tier-banded: C/D players only (index 10.1+). The whole point of tiers —
-    // a 16 competes against 14s and 19s, not against the club champion.
+    // Tier-banded: C/D players only (index 15.1+, matching the C/D tiers). The
+    // whole point of tiers — an 18 competes against 16s and 22s, not against
+    // the club champion.
     id: 'cdNine',
     marketId: 'kc',
-    name: 'C/D Flight Nine (10.1+ only)',
+    name: 'C/D Nine (15.1+ only)',
     formatId: 'twilightNine',
-    indexRange: [10.1, 54],
+    indexRange: [15.1, 54],
     fieldSize: 8,
     fieldSizeMin: 4,
     entryFeeMinCents: 1000,

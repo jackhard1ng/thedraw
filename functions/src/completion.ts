@@ -223,7 +223,151 @@ export async function maybeCompleteTournament(tournamentId: string) {
     }
   }
 
+  // Recent form for the player card. Never allowed to block completion or
+  // payouts — a failed history write is logged, not thrown.
+  try {
+    await writePlayerResults(tournamentId, t, format, entries, awardsToWrite, memberShare);
+  } catch (err) {
+    console.error(`playerResults write failed for ${tournamentId}: ${(err as Error).message}`);
+  }
+
   await tRef.update({ status: 'complete' });
+}
+
+// --- recent form (playerResults) ---------------------------------------------
+const PLACEMENT_TEXT: Record<string, string> = {
+  champion: 'Champion',
+  runnerUp: 'Runner-up',
+  semifinalist: 'Semifinalist',
+  quarterfinalist: 'Quarterfinalist',
+  podWinner: 'Pod winner',
+  flightWinner: 'Flight winner',
+};
+
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`;
+}
+
+/**
+ * One row per player per completed event — `playerResults/{tid}_{uid}`, a
+ * deterministic id so a re-run overwrites instead of duplicating. This is what
+ * a stranger reads before agreeing to play: who they faced (and at what index),
+ * how it went, and what was on it.
+ */
+async function writePlayerResults(
+  tournamentId: string,
+  t: any,
+  format: any,
+  entries: EntryLite[],
+  awards: { entryId: string; placement: string }[],
+  memberShare: Map<string, number>,
+) {
+  const active = entries.filter((e) => e.status !== 'withdrawn');
+  if (active.length === 0) return;
+  const playedAt = (t.startsAt as Timestamp | undefined) ?? Timestamp.now();
+  const byId = new Map(active.map((e) => [e.id, e]));
+  const names = new Map<string, string>();
+  for (const e of active) names.set(e.id, await entryName(e));
+  const awardOf = (eid: string) => awards.find((a) => a.entryId === eid)?.placement ?? null;
+
+  type Outcome = 'won' | 'lost' | 'placed' | 'dnf';
+  const rows = new Map<string, { outcome: Outcome; label: string; opp: EntryLite[]; gross: number | null }>();
+  const isMatch = format?.scoring === 'matchPlay';
+  const isPods = !isMatch && (t.structure === 'pods' || format?.advancement === 'roundRobin');
+
+  if (isMatch || isPods) {
+    const snap = await db.collection('matches').where('tournamentId', '==', tournamentId).get();
+    const matches = snap.docs
+      .map((d) => d.data() as any)
+      .filter((m) => m.status === 'complete' || m.status === 'forfeited');
+    for (const e of active) {
+      const mine = matches
+        .filter((m) => (m.entryIds as string[]).includes(e.id))
+        .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
+      const opp = mine
+        .map((m) => byId.get((m.entryIds as string[]).find((x) => x && x !== e.id) ?? ''))
+        .filter((x): x is EntryLite => !!x);
+      if (isMatch && active.length === 2 && mine.length === 1) {
+        // Heads-up: the result IS the match.
+        const m = mine[0];
+        const won = m.result?.winnerEntryId === e.id;
+        const margin = m.result?.margin ? ` ${m.result.margin}` : '';
+        rows.set(e.id, {
+          outcome: won ? 'won' : 'lost',
+          label: m.status === 'forfeited' ? (won ? 'Won by forfeit' : 'Forfeited') : `${won ? 'Won' : 'Lost'}${margin}`,
+          opp,
+          gross: null,
+        });
+      } else {
+        const p = awardOf(e.id);
+        const wins = mine.filter((m) => m.result?.winnerEntryId === e.id).length;
+        const losses = mine.filter((m) => m.result?.winnerEntryId && m.result.winnerEntryId !== e.id).length;
+        rows.set(e.id, {
+          outcome: p === 'champion' || p === 'podWinner' ? 'won' : 'placed',
+          label: `${p ? PLACEMENT_TEXT[p] ?? p : `${wins}–${losses}`} · ${isMatch ? `${active.length}-player bracket` : 'pod play'}`,
+          opp,
+          gross: null,
+        });
+      }
+    }
+  } else {
+    // Stroke play: rank by total gross within the player's flight (or the field).
+    const snap = await db.collection('scorecards').where('tournamentId', '==', tournamentId).get();
+    const total = new Map<string, number>();
+    const dnf = new Set<string>();
+    for (const d of snap.docs) {
+      const c = d.data() as { entryId: string; gross: number; status: string };
+      if (c.status === 'dnf') dnf.add(c.entryId);
+      if (c.status === 'complete') total.set(c.entryId, (total.get(c.entryId) ?? 0) + c.gross);
+    }
+    for (const e of active) {
+      if (dnf.has(e.id) || !total.has(e.id)) {
+        rows.set(e.id, { outcome: 'dnf', label: 'DNF', opp: [], gross: null });
+        continue;
+      }
+      const peers = active.filter(
+        (x) => (x.flight ?? null) === (e.flight ?? null) && total.has(x.id) && !dnf.has(x.id),
+      );
+      const mine = total.get(e.id)!;
+      const pos = peers.filter((x) => total.get(x.id)! < mine).length + 1;
+      const tied = peers.filter((x) => total.get(x.id)! === mine).length > 1;
+      rows.set(e.id, {
+        outcome: pos === 1 && !tied ? 'won' : 'placed',
+        // Golf convention: "T3 of 8" for a tie, "3rd of 8" outright.
+        label: `${tied ? `T${pos}` : ordinal(pos)} of ${peers.length}${e.flight ? ` · Flt ${e.flight}` : ''}`,
+        opp: [],
+        gross: mine,
+      });
+    }
+  }
+
+  const batch = db.batch();
+  for (const e of active) {
+    const r = rows.get(e.id);
+    if (!r) continue;
+    for (const u of e.userIds) {
+      batch.set(db.doc(`playerResults/${tournamentId}_${u}`), {
+        userId: u,
+        tournamentId,
+        tournamentName: t.name,
+        kind: isMatch ? 'match' : isPods ? 'pods' : 'stroke',
+        playedAt,
+        outcome: r.outcome,
+        label: r.label,
+        opponentNames: r.opp.map((o) => names.get(o.id) ?? 'Player'),
+        opponentUserIds: r.opp.flatMap((o) => o.userIds),
+        opponentIndexes: r.opp.map((o) => o.combinedIndex),
+        fieldSize: active.length,
+        indexAtEntry: e.combinedIndex,
+        gross: r.gross,
+        perPlayerCents: Math.round((t.entryFeeCents ?? 0) / Math.max(1, e.userIds.length)),
+        wonCents: memberShare.get(`${e.id}:${u}`) ?? null,
+      });
+    }
+  }
+  await batch.commit();
 }
 
 // --- bracket ---------------------------------------------------------------

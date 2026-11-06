@@ -24,10 +24,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
-import { deleteAccount } from '@/lib/callable';
+import { deleteAccount, updateMyIndex } from '@/lib/callable';
 import { Badge, Button, Card, Num, Rule, SectionHeader, Spinner } from '@/components/ui';
 import { LegalFooter } from '@/features/legal';
-import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
+import { formatIndex, freshness, indexLine, parseIndex, sourceBadge, tierFor } from '@/lib/handicap';
 import { areasFor } from '@/lib/areas';
 import { formatTeeTime } from '@/lib/format';
 import { formatCents } from '@/lib/money';
@@ -395,6 +395,81 @@ function PhoneRow({ userId }: { userId: string }) {
  * get drawn together unless someone said "anywhere". Empty selection = anywhere
  * (the friendly default: never blocks a match).
  */
+/**
+ * Keep your index current (GHIN revises twice a month). Raising it on a
+ * verified handicap sends the badge back to pending for a quick re-check;
+ * lowering it keeps the badge. Games you've already entered keep the index
+ * frozen at entry.
+ */
+function UpdateIndex({ current, verified }: { current: number; verified: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const parsed = parseIndex(val);
+  const valid = val.trim() !== '' && Number.isFinite(parsed) && parsed >= -10 && parsed <= 54;
+
+  if (!open) {
+    return (
+      <div className="mt-3 border-t border-rule pt-2">
+        <button
+          className="text-xs text-ink-faint underline underline-offset-2 hover:text-tournament"
+          onClick={() => {
+            setOpen(true);
+            setMsg(null);
+            setVal(formatIndex(current));
+          }}
+        >
+          Update my index
+        </button>
+        {msg && <p className="mt-1 text-xs text-pine">{msg}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 space-y-2 border-t border-rule pt-3">
+      <div className="flex items-center gap-2">
+        <input
+          className="field-input tnum w-24"
+          inputMode="decimal"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          aria-label="New handicap index"
+        />
+        <Button
+          variant="primary"
+          disabled={!valid || busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await updateMyIndex({ index: parsed });
+              setMsg(
+                r.data.reverify
+                  ? 'Saved. Your index went up, so the verified badge is pending until an organizer re-checks it — request filed.'
+                  : 'Saved.',
+              );
+              setOpen(false);
+            } catch (e) {
+              setMsg((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+        <button className="btn-quiet text-xs" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+      <p className="text-xs text-ink-faint">
+        Plus handicap? Type it with a + (e.g. +1.2). Games you've already entered keep the index you entered with.
+        {verified && ' Raising a verified index sends it back for a quick re-check; lowering it keeps the badge.'}
+      </p>
+    </div>
+  );
+}
+
 function AreaPrefs({ userId, marketId, areas }: { userId: string; marketId: string; areas?: string[] }) {
   const options = areasFor(marketId);
   const selected = new Set(areas ?? []);
@@ -503,27 +578,32 @@ export function ProfilePage() {
               Handicap
             </p>
             <p className="mt-1 text-xl">
-              <Num>{indexLine(profile.handicap)}</Num>
+              <Num>{indexLine(profile.handicap, profile.tourIndex)}</Num>
             </p>
             {/* The tier — stable while the decimal drifts; derived, never stored. */}
             <p className="mt-1">
               <Badge tone="tournament">
-                Tier {tierFor(profile.handicap.index).label}
+                Tier {tierFor(profile.tourIndex ?? profile.handicap.index).label}
               </Badge>
               <span className="ml-2 text-xs text-ink-faint">
-                {tierFor(profile.handicap.index).range}
+                {tierFor(profile.tourIndex ?? profile.handicap.index).range}
               </span>
             </p>
           </div>
           <div className="text-right">
             <Badge tone={badge.tone}>{badge.label}</Badge>
-            {profile.handicap.verifiedAt && (
+            {profile.handicap.verifiedAt ? (
               <p className={`mt-1 text-xs ${fresh === 'fresh' ? 'text-fresh' : fresh === 'stale' ? 'text-stale' : 'text-ink-faint'}`}>
                 Verified {formatTeeTime(profile.handicap.verifiedAt)}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-ink-faint">
+                Updated {formatTeeTime(profile.handicap.updatedAt ?? profile.createdAt)}
               </p>
             )}
           </div>
         </div>
+        <UpdateIndex current={profile.handicap.index} verified={!!profile.handicap.verifiedAt} />
         {!profile.handicap.verifiedAt && (
           <VerificationRequest
             userId={fbUser.uid}

@@ -337,6 +337,11 @@ export const requestEvent = httpsCallable<
 >(functions, 'requestEvent');
 
 // ---- Partner search (team entry) -------------------------------------------
+export const updateMyIndex = httpsCallable<
+  { index: number },
+  { ok: boolean; index: number; reverify: boolean }
+>(functions, 'updateMyIndex');
+
 export const searchPlayers = httpsCallable<
   { query: string },
   { results: { uid: string; displayName: string; index: number; verified: boolean }[] }

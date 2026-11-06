@@ -48,6 +48,8 @@ export interface Handicap {
   sourceUrl: string | null; // link to wherever they keep it
   verifiedAt: Ts | null;
   verifiedBy: string | null; // organizer userId
+  /** When the player last changed the number (updateMyIndex). Absent = since joining. */
+  updatedAt?: Ts | null;
 }
 
 export interface User {
@@ -77,6 +79,32 @@ export interface User {
   };
   /** Where in the metro they'd play (KC_AREAS ids). Empty/absent = anywhere. */
   areas?: string[];
+  /** Organizer-set competition index (adjustTourIndex); overrides the claimed
+   *  index at entry. Shown beside it on the player card, never blended. */
+  tourIndex?: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// playerResults/{tournamentId}_{userId} — one row per player per completed
+// event, written at completion. Public: it's the "recent form" a stranger reads
+// before agreeing to play (who they played, how it went, what was on it).
+// ---------------------------------------------------------------------------
+export interface PlayerResult {
+  userId: string;
+  tournamentId: string;
+  tournamentName: string;
+  kind: 'match' | 'stroke' | 'pods';
+  playedAt: Ts;
+  outcome: 'won' | 'lost' | 'placed' | 'dnf';
+  label: string; // "Won 3&2", "Lost 1 up", "T2 of 8", "Champion · 8-player bracket"
+  opponentNames: string[]; // match: who they faced; stroke: empty (the field)
+  opponentUserIds: string[];
+  opponentIndexes: number[]; // frozen at entry
+  fieldSize: number;
+  indexAtEntry: number; // the player's own frozen index
+  gross: number | null; // stroke only
+  perPlayerCents: number; // what each player put up (0 = free)
+  wonCents: number | null; // their share of the purse, if any
 }
 
 // ---------------------------------------------------------------------------

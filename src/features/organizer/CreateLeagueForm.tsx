@@ -172,12 +172,12 @@ export function CreateLeagueForm() {
 
         <Field
           label="Flight split (optional)"
-          hint="An index cutoff, e.g. 12 — makes two flights (0–12 and 12.1+) that compete separately each week."
+          hint="An index cutoff, e.g. 15 — makes two flights (A/B: 15.0 & under, C/D: 15.1+) that compete separately each week. 8 or 24 split at the other tier lines."
         >
           <input
             className="field-input tnum"
             inputMode="decimal"
-            placeholder="12"
+            placeholder="15"
             value={flightCut}
             onChange={(e) => setFlightCut(e.target.value)}
           />

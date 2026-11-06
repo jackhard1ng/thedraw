@@ -1,24 +1,47 @@
 /**
- * Another player's public card (/players/:uid) — the trust story's missing
- * page. Everything here is the data the product WANTS public between members:
- * name, handicap tier + source badge, reliability, and the competitive record.
- * Nothing contact-related lives on the users doc anymore, so this page cannot
- * leak what it never receives.
+ * Another player's public card (/players/:uid) — built for one decision: "do I
+ * want to play this person?" Everything here is the data the product WANTS
+ * public between members: the number they play off and how well-sourced it is,
+ * how they've actually played lately and for what, whether they show up, and
+ * your own history with them. Nothing contact-related lives on the users doc,
+ * so this page cannot leak what it never receives.
+ *
+ * Facts, never ratings: no star scores, no "sandbagger" labels (§8). A stranger
+ * gets enough to judge for themselves.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, doc, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Badge, Card, Num, SectionHeader, Spinner } from '@/components/ui';
 import { FollowButton } from '@/features/spectating/FollowButton';
 import { ReportBlockMenu } from '@/features/moderation/ReportBlockMenu';
 import { useAuth } from '@/context/AuthContext';
-import { freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
+import { formatIndex, freshness, indexLine, sourceBadge, tierFor } from '@/lib/handicap';
 import { formatTeeTime } from '@/lib/format';
 import { formatCents } from '@/lib/money';
-import type { ReputationEvent, User } from '@/types/models';
+import type { PlayerResult, ReputationEvent, Ts, User } from '@/types/models';
 
-function Reliability({ userId }: { userId: string }) {
+const shortDate = (ts: Ts | null | undefined) =>
+  ts ? new Date(ts.toMillis()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+const monthYear = (ts: Ts | null | undefined) =>
+  ts ? new Date(ts.toMillis()).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '';
+
+/** One plain sentence on what the handicap badge actually means to a stranger. */
+function sourceExplainer(user: User): string {
+  const h = user.handicap;
+  if (h.source === 'self') {
+    return `Self-declared — they entered this number themselves; nobody has checked it. Updated ${shortDate(h.updatedAt ?? user.createdAt)}.`;
+  }
+  if (!h.verifiedAt) {
+    return `${h.source === 'ghin' ? 'GHIN' : 'Linked record'} claimed, not yet checked by an organizer. Updated ${shortDate(h.updatedAt ?? user.createdAt)}.`;
+  }
+  return h.source === 'ghin'
+    ? `An organizer matched this to their GHIN record on ${shortDate(h.verifiedAt)}.`
+    : `An organizer checked their linked handicap record on ${shortDate(h.verifiedAt)}.`;
+}
+
+function Reliability({ user, userId }: { user: User; userId: string }) {
   const [events, setEvents] = useState<ReputationEvent[] | null>(null);
   useEffect(() => {
     const q = query(collection(db, 'reputationEvents'), where('userId', '==', userId));
@@ -29,20 +52,127 @@ function Reliability({ userId }: { userId: string }) {
     );
   }, [userId]);
   if (events === null) return null;
-  const committed = events.filter((e) => e.type === 'committed').length;
-  const played = events.filter((e) => e.type === 'played').length;
-  const forfeits = events.filter((e) => e.type === 'forfeitNonResponse').length;
-  if (committed === 0) return <p className="text-sm text-ink-faint">No committed rounds yet.</p>;
+  // Everything shown is the last year — old flakes shouldn't follow forever.
+  const now = Date.now();
+  const live = events.filter((e) => !e.expiresAt || e.expiresAt.toMillis() > now);
+  const count = (t: string) => live.filter((e) => e.type === t).length;
+  const committed = count('committed');
+  const played = count('played');
+  const forfeits = count('forfeitNonResponse');
+  const late = count('lateCancel');
+
   return (
-    <p className="text-ink">
-      Played <Num>{played}</Num> of <Num>{committed}</Num> committed rounds
-      {forfeits > 0 && (
-        <span className="text-ink-soft">
-          {' '}· <Num>{forfeits}</Num> forfeit{forfeits === 1 ? '' : 's'} in the last year
-        </span>
+    <div className="space-y-1 text-sm">
+      {committed === 0 ? (
+        <p className="text-ink-faint">New to The Draw — no committed rounds yet.</p>
+      ) : (
+        <p className="text-ink">
+          Played <Num>{played}</Num> of <Num>{committed}</Num> committed rounds
+        </p>
       )}
-      .
-    </p>
+      <p className="text-ink-soft">
+        <Num>{forfeits}</Num> forfeit{forfeits === 1 ? '' : 's'} · <Num>{late}</Num> late cancel
+        {late === 1 ? '' : 's'} <span className="text-ink-faint">· last 12 months</span>
+      </p>
+      <p className="text-xs text-ink-faint">Member since {monthYear(user.createdAt)}</p>
+    </div>
+  );
+}
+
+function stakesLine(rs: PlayerResult[]): string | null {
+  if (rs.length === 0) return null;
+  const paid = rs.map((r) => r.perPlayerCents).filter((c) => c > 0).sort((a, b) => a - b);
+  if (paid.length === 0) return 'Free games so far';
+  const lo = paid[0];
+  const hi = paid[paid.length - 1];
+  const range = lo === hi ? formatCents(lo) : `${formatCents(lo)}–${formatCents(hi)}`;
+  const free = rs.length - paid.length;
+  if (free === 0) return `Usually plays for ${formatCents(paid[Math.floor(paid.length / 2)])}${lo !== hi ? ` (${range})` : ''}`;
+  return `${paid.length} money game${paid.length === 1 ? '' : 's'} (${range}) · ${free} free`;
+}
+
+function RecentForm({ userId }: { userId: string }) {
+  const [rows, setRows] = useState<PlayerResult[] | null>(null);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'playerResults'),
+      where('userId', '==', userId),
+      orderBy('playedAt', 'desc'),
+      limit(10),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setRows(snap.docs.map((d) => d.data() as PlayerResult)),
+      () => setRows([]),
+    );
+  }, [userId]);
+  if (rows === null) return <Spinner />;
+  if (rows.length === 0) return <p className="text-sm text-ink-faint">No completed games yet.</p>;
+  const stakes = stakesLine(rows);
+  return (
+    <div>
+      {stakes && <p className="mb-2 text-sm text-ink-soft">{stakes}</p>}
+      <div className="divide-y divide-rule">
+        {rows.slice(0, 5).map((r) => (
+          <div key={r.tournamentId} className="flex items-start justify-between gap-3 py-2 text-sm">
+            <div className="min-w-0">
+              <p
+                className={`truncate ${
+                  r.outcome === 'won' ? 'text-pine' : r.outcome === 'lost' ? 'text-tournament' : 'text-ink'
+                }`}
+              >
+                {r.label}
+                {r.gross != null && <span className="text-ink-faint"> · shot <Num>{r.gross}</Num></span>}
+              </p>
+              <p className="truncate text-xs text-ink-faint">
+                {r.opponentNames.length > 0
+                  ? `vs ${r.opponentNames
+                      .map((n, i) => (r.opponentIndexes[i] != null ? `${n} (${formatIndex(r.opponentIndexes[i])})` : n))
+                      .join(', ')}`
+                  : r.tournamentName}{' '}
+                · played off <Num>{formatIndex(r.indexAtEntry)}</Num> · {shortDate(r.playedAt)}
+              </p>
+            </div>
+            <span className="shrink-0 text-right text-xs text-ink-faint">
+              {r.perPlayerCents > 0 ? formatCents(r.perPlayerCents) : 'Free'}
+              {r.wonCents != null && r.wonCents > 0 && (
+                <span className="block text-pine">+{formatCents(r.wonCents)}</span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** "You're 2–1 against them" — only head-to-head matches count. */
+function HeadToHead({ userId, viewerId }: { userId: string; viewerId: string }) {
+  const [rows, setRows] = useState<PlayerResult[] | null>(null);
+  useEffect(() => {
+    const q = query(
+      collection(db, 'playerResults'),
+      where('userId', '==', viewerId),
+      where('opponentUserIds', 'array-contains', userId),
+    );
+    return onSnapshot(
+      q,
+      (snap) => setRows(snap.docs.map((d) => d.data() as PlayerResult)),
+      () => setRows([]),
+    );
+  }, [userId, viewerId]);
+  const record = useMemo(() => {
+    const m = (rows ?? []).filter((r) => r.kind === 'match');
+    return { w: m.filter((r) => r.outcome === 'won').length, l: m.filter((r) => r.outcome === 'lost').length, n: m.length };
+  }, [rows]);
+  if (!rows || record.n === 0) return null;
+  return (
+    <Card className="mt-4 p-3 text-sm">
+      <span className="font-display uppercase tracking-wide text-xs text-ink-faint">You vs them</span>
+      <span className="ml-2 text-ink">
+        <Num>{record.w}</Num>–<Num>{record.l}</Num> in <Num>{record.n}</Num> match{record.n === 1 ? '' : 'es'}
+      </span>
+    </Card>
   );
 }
 
@@ -64,7 +194,7 @@ const PLACEMENT_LABEL: Record<string, string> = {
   flightWinner: 'Flight winner',
 };
 
-function Record({ userId }: { userId: string }) {
+function Placements({ userId }: { userId: string }) {
   const [awards, setAwards] = useState<AwardRow[] | null>(null);
   useEffect(() => {
     const q = query(
@@ -128,6 +258,8 @@ export function PlayerProfilePage() {
 
   const badge = sourceBadge(user.handicap);
   const fresh = freshness(user.handicap.verifiedAt);
+  const tier = tierFor(user.tourIndex ?? user.handicap.index);
+  const viewerId = fbUser?.uid ?? null;
 
   return (
     <div className="mx-auto max-w-sheet px-4 py-6">
@@ -150,7 +282,7 @@ export function PlayerProfilePage() {
         {/* Follow = "tell me when they play again" — alerts on their posts. */}
         <div className="flex shrink-0 items-center gap-2">
           <FollowButton targetId={uid} />
-          {fbUser && fbUser.uid !== uid && (
+          {viewerId && viewerId !== uid && (
             <ReportBlockMenu
               targetType="user"
               targetId={uid}
@@ -161,16 +293,18 @@ export function PlayerProfilePage() {
         </div>
       </div>
 
+      {viewerId && viewerId !== uid && <HeadToHead userId={uid} viewerId={viewerId} />}
+
       <Card className="mt-6 p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="font-display uppercase tracking-wide text-xs text-ink-faint">Handicap</p>
+            <p className="font-display uppercase tracking-wide text-xs text-ink-faint">Plays off</p>
             <p className="mt-1 text-xl">
-              <Num>{indexLine(user.handicap)}</Num>
+              <Num>{indexLine(user.handicap, user.tourIndex)}</Num>
             </p>
             <p className="mt-1">
-              <Badge tone="tournament">Tier {tierFor(user.handicap.index).label}</Badge>
-              <span className="ml-2 text-xs text-ink-faint">{tierFor(user.handicap.index).range}</span>
+              <Badge tone="tournament">Tier {tier.label}</Badge>
+              <span className="ml-2 text-xs text-ink-faint">{tier.range}</span>
             </p>
           </div>
           <div className="text-right">
@@ -182,16 +316,28 @@ export function PlayerProfilePage() {
             )}
           </div>
         </div>
+        <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-soft">{sourceExplainer(user)}</p>
+        {user.tourIndex != null && (
+          <p className="mt-1 text-xs text-ink-soft">
+            Tour Index <Num>{formatIndex(user.tourIndex)}</Num> is set by an organizer from their play here —
+            it's the number used when they enter competitions.
+          </p>
+        )}
       </Card>
 
       <div className="mt-6">
         <SectionHeader>Reliability</SectionHeader>
-        <Reliability userId={uid} />
+        <Reliability user={user} userId={uid} />
       </div>
 
       <div className="mt-6">
-        <SectionHeader>Record</SectionHeader>
-        <Record userId={uid} />
+        <SectionHeader>Recent form</SectionHeader>
+        <RecentForm userId={uid} />
+      </div>
+
+      <div className="mt-6">
+        <SectionHeader>Placements</SectionHeader>
+        <Placements userId={uid} />
       </div>
     </div>
   );

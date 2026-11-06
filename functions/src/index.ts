@@ -67,6 +67,8 @@ export {
 
 export { followUser, unfollowUser, requestEvent, searchPlayers } from './social';
 
+export { updateMyIndex } from './profile';
+
 export { createInstantEvent } from './instant';
 
 export { createTourSeries, createTourStop } from './tour';
