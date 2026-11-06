@@ -162,13 +162,43 @@ export const setAgreedTime = onCall<{
   return { ok: true };
 });
 
+/**
+ * Mark the tee time as booked (#3) — the explicit handoff for the one step the
+ * app can't do: reserving the slot at the course. Either player can set it; the
+ * other hears about it so nobody double-books or wonders if it's handled.
+ */
+export const markTeeBooked = onCall<{ matchId: string; booked: boolean }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const ref = db.doc(`matches/${req.data.matchId}`);
+  const match = (await ref.get()).data() as MatchDoc | undefined;
+  if (!match) throw new HttpsError('not-found', 'Match not found.');
+  const actor = await actorEntry(match, uid);
+  if (!actor) throw new HttpsError('permission-denied', 'You are not in this match.');
+  if (match.status !== 'scheduled') throw new HttpsError('failed-precondition', 'Only a scheduled match can be marked booked.');
+  await ref.update({ teeBooked: req.data.booked ? { by: uid, at: Timestamp.now() } : null });
+  if (req.data.booked) {
+    const other = match.entryIds.find((e) => e && e !== actor);
+    if (other) {
+      const oe = (await db.doc(`entries/${other}`).get()).data() as { captainId: string } | undefined;
+      if (oe) {
+        await notify({
+          userId: oe.captainId,
+          title: 'Tee time booked',
+          body: 'Your opponent booked the tee time — you’re set. Details in the match chat.',
+          link: `/matches/${req.data.matchId}`,
+        });
+      }
+    }
+  }
+  return { ok: true };
+});
+
 export const submitResult = onCall<{
   matchId: string;
   winnerEntryId: string;
   margin: string;
   scorecardPhotoUrl?: string;
-}>(async (req) => {
-  const uid = requireAuth(req.auth);
+}>(async (req) => {  const uid = requireAuth(req.auth);
   const ref = db.doc(`matches/${req.data.matchId}`);
   const match = (await ref.get()).data() as MatchDoc | undefined;
   if (!match) throw new HttpsError('not-found', 'Match not found.');

@@ -38,6 +38,7 @@ import {
   disputeResult,
   cancelScheduledMatch,
   collectGreenFees,
+  markTeeBooked,
 } from '@/lib/callable';
 import { dollarsToCents, formatCents } from '@/lib/money';
 import { ChatThread } from '@/features/chat/ChatThread';
@@ -534,6 +535,54 @@ export function MatchPage() {
                 Agreed: {formatTeeTime(match.scheduling.agreedTime)}
                 {course ? ` · ${course.name}` : ''}
               </p>
+            </div>
+
+            {/* Book the tee time (#3) — the one step the app can't do for you. */}
+            <div className="rounded-sm border border-rule p-3">
+              <p className="font-display uppercase tracking-wide text-xs text-ink-soft">
+                Book the tee time
+              </p>
+              {match.teeBooked ? (
+                <p className="mt-1 text-sm text-pine">
+                  ✓ Booked by {users[match.teeBooked.by]?.displayName ?? 'a player'} — you're set.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-ink-faint">
+                    One of you reserves the slot at {course?.name ?? 'the course'} — green
+                    fees are paid there.
+                  </p>
+                  {course?.bookingUrl ? (
+                    <a
+                      href={course.bookingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block font-display uppercase tracking-wide text-sm text-tournament underline underline-offset-2"
+                    >
+                      Book at {course.name} ↗
+                    </a>
+                  ) : course?.bookingPlatform ? (
+                    <p className="mt-2 text-xs text-ink-faint">Book via {course.bookingPlatform}.</p>
+                  ) : (
+                    <p className="mt-2 text-xs text-ink-faint">Book directly with the course.</p>
+                  )}
+                </>
+              )}
+              {myEntry && (
+                <button
+                  className="mt-2 block text-xs text-ink-faint underline underline-offset-2 hover:text-tournament"
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      await markTeeBooked({ matchId: match.id, booked: !match.teeBooked });
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  {match.teeBooked ? 'Mark as not booked' : 'I booked it ✓'}
+                </button>
+              )}
             </div>
 
             {/* Green fees: default is pay-at-the-course — the app touches

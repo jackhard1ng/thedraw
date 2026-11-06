@@ -380,6 +380,8 @@ export interface Match {
   /** Live scoring: who enters the group's holes. Defaults to the booker when
    *  the tee time is set; either player can claim it (claimScorekeeper). */
   scorekeeperUid?: string | null;
+  /** The explicit "I booked the tee time at the course" handoff (#3). */
+  teeBooked?: { by: string; at: Ts } | null;
   /**
    * Present ONLY when the booker prepaid and opted to split (§5). Default is
    * green fees paid individually at the course — no money through the app.

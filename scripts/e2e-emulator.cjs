@@ -537,6 +537,34 @@ async function main() {
   await call(fns.confirmRoundScore, 'mkB', { scorecardId: `${qt}_${qa}_1` });
   check('paper-scored event completes (mkB 40 beats mkA 44)', (await db.doc(`tournaments/${qt}`).get()).data().status === 'complete');
 
+  // ================= FLOW R — tee time carries through + lock-when-full + booking
+  console.log('\nFLOW R — heads-up: set a time, 2nd join locks it already-scheduled; book handoff');
+  await makeUser('uu1', 'Reed, T.', 9.0);
+  await makeUser('uu2', 'Stone, L.', 11.0);
+  const teeAt = Date.now() + 5 * 86400000;
+  const rEvt = await call(fns.createInstantEvent, 'uu1', {
+    templateId: 'headsUpFree', placeId: 'swopeTest', startsAt: teeAt, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const rt = rEvt.tournamentId;
+  await call(fns.enterTournament, 'uu1', { tournamentId: rt });
+  check('still open after the first join', (await db.doc(`tournaments/${rt}`).get()).data().status === 'open');
+  await call(fns.enterTournament, 'uu2', { tournamentId: rt });
+  // No closeRegistration call — it should lock itself now that it's full (#2).
+  check('locks itself the moment it fills (no organizer close)', (await db.doc(`tournaments/${rt}`).get()).data().status === 'inProgress');
+  const rm = (await db.doc(`matches/${rt}_r1_m0`).get()).data();
+  check('match opens already SCHEDULED — no availability negotiation (#1)', rm.status === 'scheduled', rm.status);
+  check('tee time carried through from the event', !!rm.scheduling.agreedTime && rm.scheduling.agreedTime.toMillis() === teeAt);
+  check('course carried through from the event', rm.scheduling.placeId === 'swopeTest', rm.scheduling.placeId);
+  check('scorekeeper is set on the carried-through match', !!rm.scorekeeperUid);
+  // Booking handoff (#3).
+  let bookNonPlayer = false;
+  try { await call(fns.markTeeBooked, 'p3', { matchId: `${rt}_r1_m0`, booked: true }); } catch { bookNonPlayer = true; }
+  check('a non-player cannot mark the tee time booked', bookNonPlayer);
+  await call(fns.markTeeBooked, 'uu1', { matchId: `${rt}_r1_m0`, booked: true });
+  check('a player marks the tee time booked', (await db.doc(`matches/${rt}_r1_m0`).get()).data().teeBooked?.by === 'uu1');
+  await call(fns.markTeeBooked, 'uu1', { matchId: `${rt}_r1_m0`, booked: false });
+  check('booking can be undone', !(await db.doc(`matches/${rt}_r1_m0`).get()).data().teeBooked);
+
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');
   const mkSched = async (mid, eA, eB, uA, uB, hoursOut) => {

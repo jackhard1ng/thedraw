@@ -125,6 +125,10 @@ export const disputeResult = httpsCallable<
   { matchId: string; note: string },
   { ok: boolean }
 >(functions, 'disputeResult');
+export const markTeeBooked = httpsCallable<
+  { matchId: string; booked: boolean },
+  { ok: boolean }
+>(functions, 'markTeeBooked');
 
 // Stroke-play scorecards (gross foursome, multi-round stroke play).
 export const submitRoundScore = httpsCallable<

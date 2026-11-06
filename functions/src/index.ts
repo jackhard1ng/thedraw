@@ -44,6 +44,7 @@ export {
   submitRoundScore,
   confirmRoundScore,
   disputeRoundScore,
+  markTeeBooked,
 } from './matches';
 
 export {

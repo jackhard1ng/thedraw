@@ -26,6 +26,7 @@ import {
   deriveStats,
   writeLedger,
   mostPlayed,
+  writeReputation,
 } from './shared';
 import {
   checkEligibility,
@@ -408,6 +409,7 @@ export const enterTournament = onCall(async (req) => {
   if (seriesId) await addThreadMembers(seriesId, userIds);
 
   // Reputation: committing to an event you entered.
+  await maybeLockWhenFull(tournamentId); // free events fill right here (#2)
   return { entryId: entryRef.id, clientSecret, paymentMode };
 });
 
@@ -421,6 +423,7 @@ export const confirmEntryPayment = onCall<{ entryId: string }>(async (req) => {
   const eRef = db.doc(`entries/${req.data.entryId}`);
   const e = (await eRef.get()).data() as
     | {
+        tournamentId: string;
         captainId: string;
         paymentMode?: 'authorize' | 'setup';
         paymentIntentId: string | null;
@@ -441,6 +444,7 @@ export const confirmEntryPayment = onCall<{ entryId: string }>(async (req) => {
       paymentStatus: 'methodSaved',
       paymentMethodId: typeof si.payment_method === 'string' ? si.payment_method : si.payment_method.id,
     });
+    await maybeLockWhenFull(e.tournamentId); // last paid seat → lock now (#2)
     return { status: 'methodSaved' };
   }
 
@@ -450,6 +454,7 @@ export const confirmEntryPayment = onCall<{ entryId: string }>(async (req) => {
       throw new HttpsError('failed-precondition', 'Payment was not completed — try again.');
     }
     await eRef.update({ paymentStatus: 'authorized' });
+    await maybeLockWhenFull(e.tournamentId); // last paid seat → lock now (#2)
     return { status: 'authorized' };
   }
   throw new HttpsError('failed-precondition', 'No payment on this entry.');
@@ -503,9 +508,28 @@ export const closeRegistration = onCall<{ tournamentId: string }>(async (req) =>
   return { ok: true };
 });
 
+/**
+ * Lock-when-full (#2): a 2-player money match (or any instant event) that fills
+ * should run the moment everyone's in, not wait for the registration deadline.
+ * Only closes when every seat is taken AND payment-ready, and only for instant
+ * events (organizer tournaments keep their own close timing).
+ */
+async function maybeLockWhenFull(tournamentId: string) {
+  const t = (await db.doc(`tournaments/${tournamentId}`).get()).data() as
+    | { status: string; isInstant?: boolean; maxEntries: number }
+    | undefined;
+  if (!t || t.status !== 'open' || !t.isInstant) return;
+  const snap = await db.collection('entries').where('tournamentId', '==', tournamentId).where('status', '==', 'active').get();
+  if (snap.size < t.maxEntries) return;
+  const ready = snap.docs.filter((d) =>
+    ['authorized', 'methodSaved', 'captured'].includes((d.data() as { paymentStatus: string }).paymentStatus),
+  );
+  if (ready.length < t.maxEntries) return;
+  await runClose(tournamentId);
+}
+
 /** The close routine, callable from the scheduler too. */
-export async function runClose(tournamentId: string) {
-  const tRef = db.doc(`tournaments/${tournamentId}`);
+export async function runClose(tournamentId: string) {  const tRef = db.doc(`tournaments/${tournamentId}`);
   const t = (await tRef.get()).data() as any;
   if (!t || (t.status !== 'open' && t.status !== 'filled')) return;
 
@@ -628,6 +652,26 @@ export async function runClose(tournamentId: string) {
   if (format?.scoring === 'matchPlay') {
     const res = await createBracketMatches(tournamentId, entriesBySeed);
     bracketRounds = res.bracketRounds;
+    // CARRY THE TEE TIME THROUGH (#1): a heads-up event where the creator
+    // already picked a time + course is a "join my tee time" — don't force the
+    // two players back into availability negotiation. Open the single match
+    // already SCHEDULED at the event's time, with the default scorekeeper set.
+    if (t.startsAt && entries.length === 2) {
+      const mref = db.doc(`matches/${tournamentId}_r1_m0`);
+      const keeper = (await mostPlayed(entries.map((e) => e.userIds[0]))) ?? entries[0].userIds[0];
+      await mref.update({
+        'scheduling.agreedTime': t.startsAt,
+        'scheduling.placeId': t.placeId ?? null,
+        'scheduling.bookedBy': t.createdBy,
+        status: 'scheduled',
+        scorekeeperUid: keeper,
+        committedRecorded: true,
+      });
+      const now = Date.now();
+      for (const e of entries) {
+        for (const u of e.userIds) await writeReputation(u, 'committed', `${tournamentId}_r1_m0`, now);
+      }
+    }
   } else if (t.structure === 'pods' || format?.advancement === 'roundRobin') {
     const pods = makePods(entriesBySeed);
     await createPodMatches(tournamentId, pods);
