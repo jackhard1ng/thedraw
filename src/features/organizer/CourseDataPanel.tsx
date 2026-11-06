@@ -41,6 +41,7 @@ export function CourseDataPanel() {
   const [editing, setEditing] = useState<CourseRow | null>(null);
   const [teeText, setTeeText] = useState('');
   const [strokeIndex, setStrokeIndex] = useState('');
+  const [holePars, setHolePars] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -66,15 +67,20 @@ export function CourseDataPanel() {
       const order = strokeIndex.trim()
         ? strokeIndex.split(/[,\s]+/).map(Number).filter((n) => !Number.isNaN(n))
         : undefined;
+      const pars = holePars.trim()
+        ? holePars.split(/[,\s]+/).map(Number).filter((n) => !Number.isNaN(n))
+        : undefined;
       const res = await updateCourseData({
         placeId: editing.placeId,
         ...(teeSets ? { teeSets } : {}),
         ...(order ? { holeHandicapOrder: order } : {}),
+        ...(pars ? { holePars: pars } : {}),
       });
       setMsg(res.data.promoted ? 'Saved — course promoted to supported.' : 'Saved.');
       setEditing(null);
       setTeeText('');
       setStrokeIndex('');
+      setHolePars('');
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -161,6 +167,17 @@ export function CourseDataPanel() {
                 placeholder="7, 1, 13, 5, 17, 9, 3, 15, 11, 2, 14, 6, 18, 10, 4, 16, 12, 8"
                 value={strokeIndex}
                 onChange={(e) => setStrokeIndex(e.target.value)}
+              />
+            </Field>
+            <Field
+              label="Hole pars"
+              hint="18 pars from the scorecard, hole 1 through 18 (each 3-6). Powers live to-par and correct net strokes."
+            >
+              <input
+                className="field-input tnum"
+                placeholder="4, 4, 5, 3, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 4, 5"
+                value={holePars}
+                onChange={(e) => setHolePars(e.target.value)}
               />
             </Field>
             <div className="flex gap-2">

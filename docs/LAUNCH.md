@@ -176,6 +176,39 @@ game like a real transfer.
 
 ---
 
+## 3b. Course setup for live scoring
+
+Live scoring (hole-by-hole, with a live leaderboard) works on **both 1v1 matches
+and stroke-play groups**. Scorekeepers and playing groups are assigned at close
+(for round 1), with a sensible default that any player can claim with one tap.
+
+**For full "thru 7, +2" to-par and correct net strokes, the course needs its
+hole pars + stroke index on file.** Without them, live scoring still works and
+shows **running gross + Thru** — it just can't show to-par. So set up the courses
+you'll actually run events on:
+
+- [ ] **In the app** (one course at a time): Organizer console → **Course data**.
+      Pick the course, enter its **tee sets**, **stroke index**, and **hole pars**
+      (all off the scorecard; ratings/slopes are free at ncrdb.usga.org). Saving
+      tee sets + stroke index promotes the course to **supported**; hole pars
+      unlock live to-par.
+- [ ] **Or in bulk**: fill in `scripts/setup-courses.mjs` (one entry per course —
+      placeId, tee sets, stroke index, hole pars) and run it against your live
+      project. The file's header has the exact steps, including how to get each
+      course's `placeId` (select it once in-app, then read it from the Course
+      data panel). It validates every value and refuses to run on placeholder
+      data.
+
+> **Getting the placeId right matters:** the app keys courses by Google
+> `place_id`, and events must reference the same id. The reliable way is to
+> **select the course in the app once** (which mints `courses/<placeId>`), then
+> add the hole data by that id — in the panel or the script.
+
+Do this for the handful of KC courses your first leagues and Saturday Classics
+will use. You don't need every course in the metro — just the ones you'll run on.
+
+---
+
 ## 4. Promote (QR flyers)
 
 Only now. The app already captures `?src=coursename` at onboarding, so every
