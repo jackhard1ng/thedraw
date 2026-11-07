@@ -68,12 +68,20 @@ service cloud.firestore {
         // Verification is granted by an organizer via a Cloud Function, never
         // self-asserted at signup — a client may claim a source but not a badge.
         && request.resource.data.handicap.verifiedAt == null
-        && request.resource.data.handicap.verifiedBy == null;
+        && request.resource.data.handicap.verifiedBy == null
+        // The committee Tour Index is an organizer's call, never self-set.
+        && request.resource.data.get('tourIndex', null) == null;
       allow update: if isSelf(userId)
         && request.resource.data.role == resource.data.role
         && request.resource.data.status == resource.data.status
         && request.resource.data.canCreatePaidEvents == resource.data.canCreatePaidEvents
         && request.resource.data.organizerMarkets == resource.data.organizerMarkets
+        // Organizer-owned or history fields a player must never rewrite: the
+        // Tour Index (anti-sandbag override), the 18+ gate, and join date
+        // ("member since" + account-age eligibility).
+        && request.resource.data.get('tourIndex', null) == resource.data.get('tourIndex', null)
+        && request.resource.data.get('isAdult', null) == resource.data.get('isAdult', null)
+        && request.resource.data.createdAt == resource.data.createdAt
         // handicap.verifiedBy / verifiedAt are set by organizers via functions;
         // a self-declared source is the only thing a client may set here.
         && (request.resource.data.handicap.source == 'self'

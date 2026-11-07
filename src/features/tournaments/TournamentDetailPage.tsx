@@ -11,8 +11,8 @@
  * The client eligibility check here is a courtesy that greys out the button.
  */
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -41,12 +41,24 @@ import {
   useTournament,
   useTournamentEntries,
   useTournamentMatches,
+  useUsers,
 } from './useTournaments';
 import { PayoutGrid } from './PayoutGrid';
 import { RegistrationForm, type RegistrationValue } from './RegistrationForm';
 import { ChatThread } from '@/features/chat/ChatThread';
 
 const DAY = 86_400_000;
+
+const STATUS_BADGE: Record<string, string> = {
+  draft: 'Draft',
+  open: 'Open',
+  filled: 'Full',
+  closing: 'Locking',
+  inProgress: 'In play',
+  completing: 'Settling',
+  complete: 'Final',
+  cancelled: 'Cancelled',
+};
 
 const SCORING_BLURB: Record<Scoring, string> = {
   matchPlay: 'Played hole by hole against one opponent — win more holes than they do, not fewer total strokes. Ties on a hole are halved.',
@@ -139,8 +151,18 @@ export function TournamentDetailPage() {
   const format = useFormat(tournament?.formatId);
   const entries = useTournamentEntries(id);
   const matches = useTournamentMatches(
-    tournament?.status === 'inProgress' ? id : undefined,
+    tournament && ['inProgress', 'completing', 'complete'].includes(tournament.status) ? id : undefined,
   );
+  const creator = useUsers(tournament?.createdBy ? [tournament.createdBy] : []);
+  const [params, setParams] = useSearchParams();
+  const [courseName, setCourseName] = useState<string | null>(null);
+  useEffect(() => {
+    const pid = tournament?.placeId;
+    if (!pid) return;
+    getDoc(doc(db, 'courses', pid))
+      .then((snap) => setCourseName((snap.data() as { name?: string } | undefined)?.name ?? null))
+      .catch(() => setCourseName(null));
+  }, [tournament?.placeId]);
 
   const [reg, setReg] = useState<RegistrationValue>({ partnerId: '', teamName: '' });
   const [busy, setBusy] = useState(false);
@@ -172,6 +194,24 @@ export function TournamentDetailPage() {
       .then((snap) => setAttestedRounds(snap.size))
       .catch(() => setAttestedRounds(0));
   }, [fbUser?.uid]);
+
+  // The creator lands here straight from "Start a game" with ?join=1: start
+  // their own entry immediately (a game the creator isn't in is nobody's game).
+  // Singles only — a team entry needs a partner picked first. The server
+  // re-checks eligibility and shows its reason if it refuses.
+  const [autoJoinFired, setAutoJoinFired] = useState(false);
+  useEffect(() => {
+    const me = fbUser?.uid;
+    if (autoJoinFired || params.get('join') !== '1') return;
+    if (!tournament || !format || entries === null || !me || !profile) return;
+    setAutoJoinFired(true);
+    params.delete('join');
+    setParams(params, { replace: true });
+    if (tournament.createdBy !== me || tournament.status !== 'open' || (format.teamSize ?? 1) > 1) return;
+    if (entries.some((e) => e.userIds.includes(me) && e.status !== 'withdrawn')) return;
+    void onEnter(); // hoisted declaration; this render passed the loading guard
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoJoinFired, tournament, format, entries, fbUser?.uid, profile]);
 
   if (loading || !tournament) {
     return loading ? (
@@ -232,6 +272,9 @@ export function TournamentDetailPage() {
 
   const teamSize = format?.teamSize ?? 1;
   const regValid = teamSize <= 1 || reg.partnerId.length > 0;
+  const isMatchPlay = format?.scoring === 'matchPlay';
+  const creatorName = creator[tournament.createdBy]?.displayName ?? null;
+  const startsAt = tournament.startsAt ?? null;
 
   async function onEnter() {
     if (!id) return;
@@ -286,6 +329,14 @@ export function TournamentDetailPage() {
           <p className="mt-1 text-sm text-ink-faint">
             <Num>{field}</Num>/<Num>{tournament.maxEntries}</Num> entered · min{' '}
             <Num>{tournament.minEntries}</Num>
+            {creatorName && (
+              <>
+                {' '}· by{' '}
+                <Link to={`/players/${tournament.createdBy}`} className="underline underline-offset-2">
+                  {creatorName}
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -311,10 +362,40 @@ export function TournamentDetailPage() {
             </button>
           )}
           <Badge tone={tournament.status === 'open' ? 'fresh' : 'neutral'}>
-            {tournament.status}
+            {STATUS_BADGE[tournament.status] ?? tournament.status}
           </Badge>
         </div>
       </div>
+
+      {/* When and where — for an instant game the creator already booked the
+          tee time; the field needs to see it before they commit. */}
+      {startsAt && (
+        <div className="mt-3 rounded-sm border border-rule-strong bg-paper-raised p-3 text-sm">
+          <div className="flex justify-between gap-3">
+            <span className="text-ink-soft">Tee time</span>
+            <span className="text-right text-ink">
+              {formatTeeTime(startsAt)} · {relativeDays(startsAt)}
+            </span>
+          </div>
+          <div className="mt-1 flex justify-between gap-3">
+            <span className="text-ink-soft">Course</span>
+            <span className="text-right text-ink">
+              {courseName ?? (tournament.placeId ? 'Course on file' : 'Set in the chat')}
+            </span>
+          </div>
+          <p className="mt-2 border-t border-rule pt-2 text-xs text-ink-faint">
+            Booked by the creator with the course — The Draw doesn't reserve tee
+            times. Green fees are paid to the course.
+          </p>
+        </div>
+      )}
+
+      {isCreator && !myEntry && tournament.status === 'open' && !pendingPayment && !justEntered && (
+        <div className="mt-3 rounded-sm border border-tournament bg-tournament/5 p-3 text-sm text-ink">
+          You started this game but you’re not in the field yet.{' '}
+          <span className="text-ink-soft">Enter below to take your spot.</span>
+        </div>
+      )}
 
       {tournament.description && (
         <p className="mt-3 whitespace-pre-wrap text-ink-soft">
@@ -354,12 +435,24 @@ export function TournamentDetailPage() {
           Every deadline in the forfeit ladder counts down on the other side of it. */}
       {myEntry &&
         (() => {
-          const live = (matches ?? []).find(
-            (m) =>
-              m.entryIds.includes(myEntry.id) &&
-              ['scheduling', 'scheduled', 'awaitingConfirmation'].includes(m.status),
-          );
-          if (!live) return null;
+          const mine = (matches ?? []).filter((m) => m.entryIds.includes(myEntry.id));
+          const live =
+            mine.find((m) =>
+              ['scheduling', 'scheduled', 'awaitingResult', 'awaitingConfirmation'].includes(m.status),
+            ) ?? null;
+          if (!live) {
+            const last = mine.find((m) => ['complete', 'forfeited', 'voided', 'voidedWeather'].includes(m.status));
+            if (!last) return null;
+            return (
+              <button
+                onClick={() => nav(`/matches/${last.id}`)}
+                className="mt-4 flex w-full items-center justify-between rounded-sm border border-rule-strong bg-paper-raised p-3 text-left"
+              >
+                <span className="font-display uppercase tracking-wide text-sm text-ink">Your match — result</span>
+                <span className="text-tournament">→</span>
+              </button>
+            );
+          }
           const needsAction =
             live.status === 'scheduling' || live.status === 'awaitingConfirmation';
           return (
@@ -377,8 +470,10 @@ export function TournamentDetailPage() {
                   {live.status === 'scheduling'
                     ? 'Needs scheduling — post your availability before the deadline.'
                     : live.status === 'scheduled'
-                      ? 'Scheduled — details and chat inside.'
-                      : 'A result is waiting on confirmation.'}
+                      ? 'Set — book the tee time, chat, and keep score inside.'
+                      : live.status === 'awaitingResult'
+                        ? 'In play — live scoring and the result are inside.'
+                        : 'A result is waiting on confirmation.'}
                 </span>
               </span>
               <span className="text-tournament">→</span>
@@ -422,10 +517,14 @@ export function TournamentDetailPage() {
         >
           Payouts
         </SectionHeader>
-        <PayoutGrid
-          rows={tournament.payoutTable}
-          poolCents={free ? undefined : projectedPool}
-        />
+        {/* A free event has no pot — a percentage grid would be meaningless. */}
+        {free ? (
+          !hasAddedPrize && (
+            <p className="text-sm text-ink-soft">No pot — played for the result and the record.</p>
+          )
+        ) : (
+          <PayoutGrid rows={tournament.payoutTable} poolCents={projectedPool} />
+        )}
         {!free && (
           <p className="mt-1 text-xs text-ink-faint">
             Projected at the current field of <Num>{projectedN}</Num>.
@@ -466,12 +565,12 @@ export function TournamentDetailPage() {
               </p>
             )}
             <p className="mt-3 border-t border-rule pt-2 text-xs text-ink-faint">
-              Most games on The Draw run on a pot: players put up the stakes, we
-              hold the money and take a small percentage only if the game
-              happens, then pay the winner. This one’s on the house.
+              Most games on The Draw run on a pot: each player’s stake is held
+              on their card, charged only once the field locks, and the winner
+              is paid the pot minus a small platform fee. This one’s on the house.
             </p>
             <p className="mt-1 text-xs text-ink-faint">
-              Green fees are separate — you pay the course directly when you play.
+              Green fees are always paid directly to the course.
             </p>
           </Card>
         ) : (
@@ -509,13 +608,12 @@ export function TournamentDetailPage() {
               pool before payouts.
             </p>
             <p className="mt-2 text-xs text-pine">
-              You're only charged if the event runs. Enter and your card is held
-              (or saved, for longer windows); if the field falls short at close,
-              nothing is collected.
+              You're only charged if the game is on. Enter and your card is held
+              (or saved, for longer windows) and charged once the field locks;
+              if it doesn't fill or is canceled, the hold is released.
             </p>
             <p className="mt-1 text-xs text-ink-faint">
-              Green fees are separate — you pay the course directly when you
-              play, unless the event says otherwise.
+              Green fees are always paid directly to the course.
             </p>
           </Card>
         )}
@@ -534,7 +632,24 @@ export function TournamentDetailPage() {
               .map((e) => (
                 <div key={e.id} className="flex items-center justify-between py-1.5 text-sm">
                   <span className="min-w-0 truncate text-ink">
-                    {e.teamName || (e as { displayNames?: string[] }).displayNames?.join(' / ') || 'Entered player'}
+                    {e.teamName ? (
+                      e.teamName
+                    ) : (e as { displayNames?: string[] }).displayNames?.length ? (
+                      (e as { displayNames?: string[] }).displayNames!.map((n, i) => (
+                        <span key={i}>
+                          {i > 0 && ' / '}
+                          {fbUser && e.userIds[i] ? (
+                            <Link to={`/players/${e.userIds[i]}`} className="hover:underline">
+                              {n}
+                            </Link>
+                          ) : (
+                            n
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      'Entered player'
+                    )}
                     {(e as { flight?: string | null }).flight && (
                       <Badge tone="neutral">Flt {(e as { flight?: string | null }).flight}</Badge>
                     )}
@@ -578,6 +693,9 @@ export function TournamentDetailPage() {
               <span className="text-ink">held, not charged</span>, when you join.
             </li>
             <li>· It's captured only once the field locks and the game is on.</li>
+            {projectedShortfall > 0 && (
+              <li>· On a field this small a $10 per-event minimum fee applies, taken from the pot.</li>
+            )}
             <li>
               ·{' '}
               {winnerTakeAll
@@ -618,8 +736,8 @@ export function TournamentDetailPage() {
           </p>
           <p className="mb-4 text-xs text-ink-faint">
             {pendingPayment.paymentMode === 'authorize'
-              ? "Your card is held, not charged. It's only charged when registration closes and the event runs; if the field falls short, the hold is released in full."
-              : 'Registration closes more than 5 days out, so your card is saved now and charged only when the event runs. If the field falls short, nothing is charged.'}
+              ? "Your card is held, not charged. It's charged only once the field locks; if it doesn't fill or is canceled, the hold is released in full."
+              : 'Registration closes more than 5 days out, so your card is saved now and charged only once the field locks. If it doesn’t fill or is canceled, nothing is charged.'}
           </p>
           <PaymentSheet
             clientSecret={pendingPayment.clientSecret}
@@ -655,11 +773,11 @@ export function TournamentDetailPage() {
               <>
                 You're in.{' '}
                 {myEntry.paymentStatus === 'authorized'
-                  ? 'Your card is held; it is charged only when the event runs.'
+                  ? 'Your stake is held on your card — charged only once the field locks.'
                   : myEntry.paymentStatus === 'methodSaved'
-                    ? 'Your card is saved; it is charged only when the event runs.'
+                    ? 'Your card is saved — charged only once the field locks.'
                     : myEntry.paymentStatus === 'captured'
-                      ? 'Entry fee collected.'
+                      ? 'The field locked and your stake is in the pot.'
                       : ''}
                 {myEntry.seed ? (
                   <>
@@ -681,9 +799,26 @@ export function TournamentDetailPage() {
           <p className="mt-1 text-ink-soft">
             {free
               ? 'You are entered.'
-              : "Payment complete — you're entered. Your card is only charged when the event runs."}
+              : "Your stake is held — you're entered. Your card is charged only once the field locks."}
+            {isMatchPlay && ' Once your opponent is in, your match page opens here — book the tee time and chat there.'}
           </p>
         </div>
+      ) : !fbUser ? (
+        <Button
+          variant="primary"
+          className="w-full"
+          disabled={tournament.status !== 'open'}
+          onClick={() => {
+            try {
+              localStorage.setItem('thedraw.returnTo', window.location.pathname);
+            } catch {
+              /* storage blocked — they'll land on the board instead */
+            }
+            nav('/');
+          }}
+        >
+          {tournament.status === 'open' ? 'Sign in to join — free account' : 'Registration closed'}
+        </Button>
       ) : (
         <div className="space-y-4">
           {!elig.eligible && (
@@ -725,3 +860,4 @@ export function TournamentDetailPage() {
     </div>
   );
 }
+

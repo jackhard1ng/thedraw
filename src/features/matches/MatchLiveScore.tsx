@@ -53,6 +53,8 @@ export function MatchLiveScore({
     totalHoles,
   );
 
+  // After an all-square round, sudden-death extra holes open up.
+  const maxHole = state.allSquareAfterRegulation || state.thru > totalHoles ? Math.min(totalHoles + 9, 27) : totalHoles;
   const isKeeper = match.scorekeeperUid === uid;
   const inMatch = entries.some((e) => uid && e.userIds.includes(uid));
 
@@ -62,8 +64,11 @@ export function MatchLiveScore({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const leadLine =
-    state.up === 0
+  const leadLine = state.allSquareAfterRegulation
+    ? `All square after ${totalHoles} — sudden death from hole ${totalHoles + 1}`
+    : state.winnerEntryId && state.margin
+      ? `${nameOf(state.winnerEntryId)} wins ${state.margin}`
+      : state.up === 0
       ? state.thru === 0
         ? 'Not started'
         : `All square thru ${state.thru}`
@@ -88,7 +93,7 @@ export function MatchLiveScore({
       await saveMatchHole({ matchId: match.id, hole, scores });
       setVa('');
       setVb('');
-      if (hole < totalHoles) setHole(hole + 1);
+      if (hole < maxHole) setHole(hole + 1);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -137,8 +142,8 @@ export function MatchLiveScore({
               <span className="tnum w-6 text-center text-ink">{hole}</span>
               <button
                 className="btn-quiet px-2"
-                onClick={() => setHole(Math.min(totalHoles, hole + 1))}
-                disabled={hole >= totalHoles}
+                onClick={() => setHole(Math.min(maxHole, hole + 1))}
+                disabled={hole >= maxHole}
               >
                 +
               </button>
@@ -198,9 +203,13 @@ export function MatchLiveScore({
         </div>
       )}
       {!isKeeper && (
-        <p className="mt-3 border-t border-rule pt-3 text-xs text-ink-faint">
-          {match.scorekeeperUid ? 'The scorekeeper is entering holes.' : 'No scorekeeper yet.'} Watch it update live.
-        </p>
+        <>
+          <p className="mt-3 border-t border-rule pt-3 text-xs text-ink-faint">
+            {match.scorekeeperUid ? 'The scorekeeper is entering holes.' : 'No scorekeeper yet — tap “Keep score” to take it.'}{' '}
+            Watch it update live.
+          </p>
+          {error && <p className="mt-2 text-sm text-tournament">{error}</p>}
+        </>
       )}
     </Card>
   );

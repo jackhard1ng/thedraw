@@ -14,7 +14,7 @@ export default defineConfig({
         name: 'The Draw',
         short_name: 'The Draw',
         description:
-          'Competition and playing partners for golfers without a regular group.',
+          'Find a game worth playing — competitive golf in Kansas City.',
         theme_color: '#0A46C2',
         background_color: '#F4F6FA',
         display: 'standalone',

@@ -95,6 +95,7 @@ export const createTournament = onCall(async (req) => {
     divisionMode: string;
     doubleDipRule: string;
     prizeType: string;
+    sponsoredPrizes?: { place: number; description: string; value: string }[] | null;
     minEntries: number;
     maxEntries: number;
     registrationOpens: number;
@@ -116,10 +117,21 @@ export const createTournament = onCall(async (req) => {
     const market = (await db.doc(`markets/${marketId}`).get()).data() as { paidEventsEnabled: boolean } | undefined;
     if (!market?.paidEventsEnabled) throw new HttpsError('failed-precondition', 'Paid events are not enabled for this market.');
     if (d.adminFeePercent < 0 || d.adminFeePercent > 30) {
-      throw new HttpsError('invalid-argument', 'Admin fee must be 0–30% (§ admin fee tiers).');
+      throw new HttpsError('invalid-argument', 'Admin fee must be 0–30%.');
     }
   }
-  validatePayoutTable(d.payoutTable, isPaid && d.prizeType === 'cashPurse');
+  // A free event has no pot — its share grid is moot, so skip the sum check.
+  if (isPaid) validatePayoutTable(d.payoutTable, d.prizeType === 'cashPurse');
+  // Prizes put up by the organizer/sponsor: shown before entry, never pooled.
+  let sponsoredPrizes: { place: number; description: string; value: string }[] | null = null;
+  if (Array.isArray(d.sponsoredPrizes) && d.sponsoredPrizes.length > 0) {
+    if (d.sponsoredPrizes.length > 10) throw new HttpsError('invalid-argument', 'At most 10 prizes.');
+    sponsoredPrizes = d.sponsoredPrizes.map((p, i) => {
+      const description = String(p?.description ?? '').trim().slice(0, 80);
+      if (!description) throw new HttpsError('invalid-argument', 'Each prize needs a description.');
+      return { place: Number.isInteger(p?.place) && p.place > 0 ? p.place : i + 1, description, value: String(p?.value ?? '').trim().slice(0, 40) };
+    });
+  }
 
   const format = await getFormat(d.formatId);
   if (isPaid && !format.eligibleForMoney) {
@@ -175,7 +187,7 @@ export const createTournament = onCall(async (req) => {
     divisionMode: d.divisionMode,
     doubleDipRule: d.doubleDipRule,
     prizeType: d.prizeType,
-    sponsoredPrizes: null,
+    sponsoredPrizes,
     minEntries: d.minEntries,
     maxEntries: d.maxEntries,
     registrationOpens: Timestamp.fromMillis(d.registrationOpens),
@@ -217,7 +229,12 @@ export const cancelTournament = onCall<{ tournamentId: string }>(async (req) => 
   const t = (await ref.get()).data();
   if (!t) throw new HttpsError('not-found', 'Tournament not found.');
   await requireOrganizer(uid, t.marketId);
-  // Void/refund any authorizations before cancelling.
+  // Only before the field locks: holds are voided and nobody is charged. Once
+  // money is captured the event plays out (or an organizer voids a specific
+  // unplayed match, which refunds) — cancelling here would strand captured money.
+  if (t.status !== 'draft' && t.status !== 'open') {
+    throw new HttpsError('failed-precondition', 'This event has already locked — money is captured, so it can’t be cancelled here.');
+  }
   await voidAllAuthorizations(req.data.tournamentId);
   await ref.update({ status: 'cancelled' });
   return { ok: true };
@@ -316,17 +333,30 @@ export const enterTournament = onCall(async (req) => {
     combinedIndex = effIndex(user) + effIndex(partner); // frozen sum (§4)
   }
 
-  // one-per-phone / one entry per user
-  const existing = await db.collection('entries').where('tournamentId', '==', tournamentId).where('userIds', 'array-contains', uid).get();
-  if (!existing.empty) throw new HttpsError('failed-precondition', 'You have already entered.');
+  if (partnerId && partnerId === uid) {
+    throw new HttpsError('invalid-argument', 'Pick a partner other than yourself.');
+  }
 
   const entryRef = db.collection('entries').doc();
+  const players = format.teamSize > 1 && partnerId ? [uid, partnerId] : [uid];
 
-  // Reserve the slot atomically; freeze the entry.
+  // Reserve the slot atomically; freeze the entry. The one-entry-per-player
+  // check lives INSIDE the transaction (two quick taps can't both get in), and
+  // a WITHDRAWN entry doesn't count — backing out of a card form must never
+  // lock a player out of the game for good.
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(tRef);
-    const cur = snap.data() as { entryIds: string[]; maxEntries: number };
+    const cur = snap.data() as { entryIds: string[]; maxEntries: number; status: string };
+    if (cur.status !== 'open') throw new HttpsError('failed-precondition', 'Registration is not open.');
     if (cur.entryIds.length >= cur.maxEntries) throw new HttpsError('failed-precondition', 'Field is full.');
+    for (const p of players) {
+      const dup = await tx.get(
+        db.collection('entries').where('tournamentId', '==', tournamentId).where('userIds', 'array-contains', p),
+      );
+      if (dup.docs.some((d) => (d.data() as { status: string }).status !== 'withdrawn')) {
+        throw new HttpsError('failed-precondition', p === uid ? 'You have already entered.' : 'Your partner is already entered.');
+      }
+    }
     tx.set(entryRef, {
       tournamentId,
       userIds,
@@ -341,6 +371,7 @@ export const enterTournament = onCall(async (req) => {
       paymentIntentId: null,
       paymentStatus: isPaid ? 'pending' : 'captured',
       status: 'active',
+      createdAt: Timestamp.now(),
     });
     tx.update(tRef, { entryIds: FieldValue.arrayUnion(entryRef.id) });
   });
@@ -360,19 +391,21 @@ export const enterTournament = onCall(async (req) => {
       await backOutEntry(tournamentId, entryRef.id);
       throw new HttpsError('failed-precondition', 'Payments are not configured yet.');
     }
-    const priv = await getPrivate(uid);
-    const customerId = await ensureCustomer(priv.stripeCustomerId, {
-      uid,
-      phone: priv.phone,
-      name: user.displayName,
-    });
-    if (customerId !== priv.stripeCustomerId) {
-      await setPrivate(uid, { stripeCustomerId: customerId });
-    }
     const AUTH_HOLD_MAX_MS = 5 * 86_400_000;
     const closesMs = (t.registrationCloses as Timestamp).toMillis();
     paymentMode = closesMs - Date.now() > AUTH_HOLD_MAX_MS ? 'setup' : 'authorize';
+    // EVERYTHING that can fail is inside the try, so a failure backs the entry
+    // out instead of leaving a 'pending' phantom that holds a seat.
     try {
+      const priv = await getPrivate(uid);
+      const customerId = await ensureCustomer(priv.stripeCustomerId, {
+        uid,
+        phone: priv.phone,
+        name: user.displayName,
+      });
+      if (customerId !== priv.stripeCustomerId) {
+        await setPrivate(uid, { stripeCustomerId: customerId });
+      }
       if (paymentMode === 'authorize') {
         const pi = await authorizeEntryFee({
           amountCents: t.entryFeeCents,
@@ -529,9 +562,24 @@ async function maybeLockWhenFull(tournamentId: string) {
 }
 
 /** The close routine, callable from the scheduler too. */
-export async function runClose(tournamentId: string) {  const tRef = db.doc(`tournaments/${tournamentId}`);
+export async function runClose(tournamentId: string) {
+  const tRef = db.doc(`tournaments/${tournamentId}`);
+  // CLAIM the close before touching money. Lock-when-full, a double-tapped
+  // payment confirm, and the hourly scheduler can all fire at once; only the
+  // one that flips open → closing proceeds. A close that crashed mid-way is
+  // re-claimable after 10 minutes (every money step below is retry-safe).
+  const STALE_MS = 10 * 60_000;
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(tRef);
+    const cur = snap.data() as { status: string; closingAt?: Timestamp } | undefined;
+    if (!cur) return false;
+    const stale = cur.status === 'closing' && (cur.closingAt?.toMillis() ?? 0) < Date.now() - STALE_MS;
+    if (cur.status !== 'open' && cur.status !== 'filled' && !stale) return false;
+    tx.update(tRef, { status: 'closing', closingAt: Timestamp.now() });
+    return true;
+  });
+  if (!claimed) return;
   const t = (await tRef.get()).data() as any;
-  if (!t || (t.status !== 'open' && t.status !== 'filled')) return;
 
   const entriesSnap = await db.collection('entries').where('tournamentId', '==', tournamentId).where('status', '==', 'active').get();
   let entries = entriesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
@@ -540,8 +588,11 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
 
   // Entries whose payment was never completed lapse at close — they were never
   // committed money, so they don't count toward the field and aren't seeded.
+  // ANY status that isn't payment-ready lapses (incl. a 'pending' left by a
+  // setup failure), so no seat counts a fee that was never collected.
+  const READY = ['authorized', 'methodSaved', 'captured'];
   if (isPaid) {
-    const lapsed = entries.filter((e) => e.paymentStatus === 'pendingAuthorization');
+    const lapsed = entries.filter((e) => !READY.includes(e.paymentStatus));
     for (const e of lapsed) {
       if (e.paymentIntentId && stripeEnabled()) {
         try { await voidIntent(e.paymentIntentId); } catch { /* nothing was held */ }
@@ -556,7 +607,7 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
         link: `/tournaments/${tournamentId}`,
       });
     }
-    entries = entries.filter((e) => e.paymentStatus !== 'pendingAuthorization');
+    entries = entries.filter((e) => READY.includes(e.paymentStatus));
   }
 
   // Under the floor → void everything. Nobody is charged (§4).
@@ -566,7 +617,7 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
     await Promise.all(
       entries.flatMap((e) =>
         (e.userIds as string[]).map((u) =>
-          notify({ userId: u, title: `${t.name} cancelled`, body: 'Not enough entries — your card was not charged.', deadlineCritical: true }),
+          notify({ userId: u, title: `${t.name} cancelled`, body: "It didn't fill — your hold was released and nothing was charged.", deadlineCritical: true, link: `/tournaments/${tournamentId}` }),
         ),
       ),
     );
@@ -583,7 +634,7 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
       try {
         let stripeRef = '';
         if (e.paymentStatus === 'authorized' && e.paymentIntentId) {
-          await captureIntent(e.paymentIntentId);
+          await captureIntent(e.paymentIntentId, `capture-${e.id}`); // idempotent
           stripeRef = e.paymentIntentId;
         } else if (e.paymentStatus === 'methodSaved' && e.paymentMethodId) {
           const captainPriv = await getPrivate(e.captainId);
@@ -595,6 +646,8 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
             entryId: e.id,
           });
           stripeRef = pi.id;
+          // Keep the in-memory entry in sync too: the refund path below reads it.
+          e.paymentIntentId = pi.id;
           await db.doc(`entries/${e.id}`).update({ paymentIntentId: pi.id });
         } else if (e.paymentStatus === 'captured') {
           paidOk.push(e); // already collected (retry-safe)
@@ -630,7 +683,7 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
           try { await refundIntent(piId); } catch (err) { console.error(`refund failed for ${e.id}: ${(err as Error).message}`); }
         }
         await db.doc(`entries/${e.id}`).update({ paymentStatus: 'refunded' });
-        await notify({ userId: e.captainId, title: `${t.name} cancelled`, body: 'Too many payment failures left the field short. Your entry fee was refunded in full.', deadlineCritical: true });
+        await notify({ userId: e.captainId, title: `${t.name} cancelled`, body: 'Too many payment failures left the field short. Your stake was refunded in full.', deadlineCritical: true, link: `/tournaments/${tournamentId}` });
       }
       await tRef.update({ status: 'cancelled' });
       return;
@@ -744,6 +797,7 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
       designated,
       allowance,
       t.roundDeadlineDays ?? 7,
+      (t.startsAt as Timestamp | undefined)?.toMillis() ?? null,
     );
 
     // LIVE SCORING: assign playing groups for round 1 so ONE scorekeeper per
@@ -780,7 +834,18 @@ export async function runClose(tournamentId: string) {  const tRef = db.doc(`tou
   await Promise.all(
     entries.flatMap((e) =>
       (e.userIds as string[]).map((u) =>
-        notify({ userId: u, title: `${t.name} is set`, body: 'The draw is live — check your match.', deadlineCritical: true, link: `/tournaments/${tournamentId}` }),
+        notify({
+          userId: u,
+          title: `${t.name} is locked in`,
+          body:
+            format?.scoring === 'matchPlay'
+              ? entries.length === 2
+                ? 'Your match is set — confirm the tee time, chat, and keep score inside.'
+                : 'The draw is made — open your match to schedule it.'
+              : 'The field is locked — your group and live scoring are on the event page.',
+          deadlineCritical: true,
+          link: `/tournaments/${tournamentId}`,
+        }),
       ),
     ),
   );

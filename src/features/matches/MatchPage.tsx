@@ -14,8 +14,8 @@
  * ladder stays deterministic and authoritative (§5).
  */
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -37,10 +37,8 @@ import {
   confirmResult,
   disputeResult,
   cancelScheduledMatch,
-  collectGreenFees,
   markTeeBooked,
 } from '@/lib/callable';
-import { dollarsToCents, formatCents } from '@/lib/money';
 import { ChatThread } from '@/features/chat/ChatThread';
 import {
   bracketSize,
@@ -55,6 +53,29 @@ import {
 } from '@/features/tournaments/useTournaments';
 import type { Course } from '@/types/models';
 import { MatchLiveScore } from './MatchLiveScore';
+
+/** What this match paid me, once the event settled (awards carry my share). */
+function MyWinnings({ tournamentId, uid }: { tournamentId: string; uid: string }) {
+  const [cents, setCents] = useState<number | null>(null);
+  useEffect(() => {
+    getDocs(query(collection(db, 'awards'), where('tournamentId', '==', tournamentId), where('userId', '==', uid)))
+      .then((snap) => {
+        const total = snap.docs.reduce((a, d) => a + ((d.data() as { amountCents?: number | null }).amountCents ?? 0), 0);
+        setCents(total);
+      })
+      .catch(() => setCents(null));
+  }, [tournamentId, uid]);
+  if (!cents) return null;
+  return (
+    <p className="mt-2 text-sm text-ink">
+      You won <span className="tnum">${(cents / 100).toFixed(2)}</span> — it goes straight to your payout
+      account.{' '}
+      <Link to="/payouts" className="text-tournament underline underline-offset-2">
+        Check payouts
+      </Link>
+    </p>
+  );
+}
 
 /** The committee copy (spec §4 disputes) — shown wherever a result is in play. */
 function CommitteeNote() {
@@ -326,6 +347,7 @@ export function MatchPage() {
     // without this a "scratch nine" would still promise a 12-stroke spread.
     scratch:
       (format?.handicapAllowance as { type?: string } | null)?.type === 'none',
+    holes: format?.holes ?? 18,
   });
 
   const log = match.scheduling.availabilityLog;
@@ -361,7 +383,9 @@ export function MatchPage() {
       ? `${entryName(match.result.winnerEntryId ?? '')} won ${match.result.margin ?? ''}`.trim()
       : match.status === 'forfeited'
         ? `${match.forfeitedBy ? `${entryName(match.forfeitedBy)} forfeited` : 'Forfeited'} — ${entryName(match.result.winnerEntryId ?? '')} advances${match.forfeitReason ? `. ${match.forfeitReason}` : ''}`
-        : 'Voided — weather';
+        : match.status === 'voided'
+          ? 'Voided — match not played. Any stakes were refunded in full.'
+          : 'Voided — weather';
 
   const STATUS_LABEL: Record<string, string> = {
     pendingOpponent: 'Waiting on an opponent',
@@ -372,6 +396,7 @@ export function MatchPage() {
     complete: 'Final',
     forfeited: 'Forfeited',
     voidedWeather: 'Voided — weather',
+    voided: 'Voided — refunded',
   };
 
   // submittedBy is an ENTRY id, not a uid — compare against my entry.
@@ -379,8 +404,8 @@ export function MatchPage() {
 
   return (
     <div className="mx-auto max-w-sheet px-4 py-6">
-      <button onClick={() => nav(-1)} className="btn-quiet mb-4 px-0">
-        ← Back
+      <button onClick={() => nav(`/tournaments/${match.tournamentId}`)} className="btn-quiet mb-4 px-0">
+        ← {tournament?.name ?? 'Event'}
       </button>
 
       {/* Pre-match education card — only once BOTH competitors exist. Against a
@@ -585,47 +610,6 @@ export function MatchPage() {
               )}
             </div>
 
-            {/* Green fees: default is pay-at-the-course — the app touches
-                nothing. The prepaid split is a quiet opt-in for the booker. */}
-            {match.greenFees?.collectedAt ? (
-              <p className="text-xs text-ink-faint">
-                Green fees collected —{' '}
-                <Num>{formatCents(match.greenFees.perPlayerCents)}</Num> each from{' '}
-                <Num>{match.greenFees.chargedUserIds.length}</Num> player
-                {match.greenFees.chargedUserIds.length === 1 ? '' : 's'}, reimbursed
-                to the booker.
-              </p>
-            ) : (
-              <p className="text-xs text-ink-faint">
-                Green fees are paid at the course.
-                {uid && match.scheduling.bookedBy === uid && (
-                  <>
-                    {' '}
-                    <button
-                      className="underline underline-offset-2 hover:text-tournament"
-                      onClick={async () => {
-                        const raw = window.prompt(
-                          'You prepaid the whole group? Enter each player\'s share in dollars (minimum $10) and their saved cards are charged — you get reimbursed automatically.',
-                        );
-                        if (!raw) return;
-                        setError(null);
-                        try {
-                          await collectGreenFees({
-                            matchId: match.id,
-                            perPlayerCents: dollarsToCents(raw),
-                          });
-                        } catch (e) {
-                          setError((e as Error).message);
-                        }
-                      }}
-                    >
-                      Prepaid the group? Split it.
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-
             <CommitteeNote />
             <MatchLiveScore match={match} entries={twoEntries} course={course} nameOf={entryName} />
             {myEntry && (
@@ -640,7 +624,7 @@ export function MatchPage() {
                   onClick={async () => {
                     if (
                       !window.confirm(
-                        'Cancel this tee time?\n\n· More than 72h out: free reschedule (one per season), green fees collected through The Draw refunded\n· 24–72h out: reschedule with a late-cancel mark on your record; app-collected green fees refunded\n· Under 24h: the match is forfeited to your opponent\n\nGreen fees paid directly to the course follow the course’s own policy.',
+                        'Cancel this tee time?\n\n· More than 72h out: free reschedule (one per season), no mark on your record\n· 24–72h out: reschedule with a late-cancel mark on your record\n· Under 24h: the match is forfeited to your opponent\n\nIf you booked the tee time, cancel it with the course — green fees follow the course’s own policy.',
                       )
                     )
                       return;
@@ -706,6 +690,7 @@ export function MatchPage() {
 
         {(match.status === 'complete' ||
           match.status === 'forfeited' ||
+          match.status === 'voided' ||
           match.status === 'voidedWeather') && (
           <div className="rounded-sm border border-tournament/30 bg-tournament/10 p-4">
             <p className="font-display uppercase tracking-wide text-tournament">{outcome}</p>
@@ -719,6 +704,7 @@ export function MatchPage() {
                 View scorecard
               </a>
             )}
+            {(match.status === 'complete' || match.status === 'forfeited') && uid && <MyWinnings tournamentId={match.tournamentId} uid={uid} />}
             {(match.result.disputed || (match.result as { resolvedByOrganizer?: boolean }).resolvedByOrganizer) && (
               <p className="mt-2 text-xs text-ink-soft">This result was disputed and ruled by an organizer.</p>
             )}
@@ -730,7 +716,7 @@ export function MatchPage() {
 
       {/* The coordination surface (Jack's rule: organizing a tee time needs a
           conversation, not just an availability log). Competitors only. */}
-      {myEntry && match.status !== 'complete' && match.status !== 'forfeited' && (
+      {myEntry && !['complete', 'forfeited', 'voided', 'voidedWeather'].includes(match.status) && (
         <div className="mt-6">
           <SectionHeader>Coordinate</SectionHeader>
           <Card className="p-4">

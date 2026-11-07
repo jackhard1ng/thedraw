@@ -210,6 +210,9 @@ export async function createScorecards(
   designatedCourses: string[],
   allowance: AllowanceSpec | number | null, // number = legacy flat percent
   roundDeadlineDays = 7,
+  /** The round's tee time, when known: deadlines run from the TEE TIME, not
+   *  from the lock (lock-when-full can lock days before anyone plays). */
+  startsAtMs?: number | null,
 ) {
   const spec: AllowanceSpec =
     typeof allowance === 'number' ? { percent: allowance } : allowance;
@@ -252,7 +255,7 @@ export async function createScorecards(
         submittedBy: null,
         confirmedBy: null,
         confirmDeadline: null,
-        dueAt: Timestamp.fromMillis(Date.now() + roundDeadlineDays * r * 86_400_000),
+        dueAt: Timestamp.fromMillis(Math.max(Date.now(), startsAtMs ?? 0) + roundDeadlineDays * r * 86_400_000),
         scorecardPhotoUrl: null,
         status: 'awaitingResult',
       });

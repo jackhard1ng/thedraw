@@ -56,6 +56,12 @@ export function CreateTournamentForm() {
     { division: 'net', place: 2, sharePercent: 15 },
   ]);
 
+  // Prizes put up by the organizer/founder (no pot) — a free launch event
+  // still needs to say what it's played for.
+  const [prizes, setPrizes] = useState<{ place: number; description: string; value: string }[]>([
+    { place: 1, description: '', value: '' },
+  ]);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,8 +75,13 @@ export function CreateTournamentForm() {
   const free = feeCents === 0;
   const item = itemizeEntry(feeCents, adminFeePercent);
 
+  const usesPrizes = free || prizeType === 'sponsoredPrizes';
+  const cleanPrizes = prizes
+    .filter((p) => p.description.trim())
+    .map((p) => ({ place: p.place, description: p.description.trim(), value: p.value.trim() }));
   const sum = sharesSum(rows);
-  const sharesValid = Math.abs(sum - 100) < 0.001;
+  // A free event has no pot, so the share grid only matters for a cash purse.
+  const sharesValid = free || Math.abs(sum - 100) < 0.001;
   const tooFewPlaces = rows.length < 2;
 
   const valid =
@@ -102,7 +113,8 @@ export function CreateTournamentForm() {
         payoutTable: rows,
         divisionMode,
         doubleDipRule,
-        prizeType,
+        prizeType: free ? 'sponsoredPrizes' : prizeType,
+        sponsoredPrizes: usesPrizes && cleanPrizes.length ? cleanPrizes : null,
         minEntries,
         maxEntries,
         registrationOpens: toMs(opens),
@@ -125,8 +137,8 @@ export function CreateTournamentForm() {
       <SectionHeader>New tournament</SectionHeader>
 
       <p className="mb-4 rounded-sm border border-rule bg-paper-sunken p-3 text-xs text-ink-soft">
-        As the organizer you cannot also compete in this event (§7). Purses are a
-        percentage of the prize fund and must be published before entries close.
+        As the organizer you cannot also compete in this event. Purses are a
+        percentage of the prize fund and are published before anyone enters.
       </p>
 
       <div className="space-y-5">
@@ -178,7 +190,7 @@ export function CreateTournamentForm() {
         )}
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Min entries" hint="Below this, all entries refunded.">
+          <Field label="Min entries" hint="Below this, every hold is released — nobody is charged.">
             <input
               type="number"
               className="field-input tnum"
@@ -269,7 +281,68 @@ export function CreateTournamentForm() {
 
         <Rule />
 
-        {/* Payout editor */}
+        {usesPrizes && (
+          <div>
+            <SectionHeader
+              right={
+                <button
+                  type="button"
+                  className="text-xs text-tournament underline"
+                  onClick={() =>
+                    setPrizes((p) => [...p, { place: p.length + 1, description: '', value: '' }])
+                  }
+                >
+                  + Prize
+                </button>
+              }
+            >
+              {free ? 'What it’s played for' : 'Sponsored prizes'}
+            </SectionHeader>
+            <p className="mb-2 text-xs text-ink-faint">
+              Put up by you or a sponsor — not pooled from entry fees. Shown on the
+              event page before anyone enters.
+            </p>
+            <div className="space-y-2">
+              {prizes.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="tnum w-6 text-ink-faint">{p.place}.</span>
+                  <input
+                    className="field-input flex-1 py-2"
+                    placeholder="e.g. $100 pro-shop credit"
+                    maxLength={80}
+                    value={p.description}
+                    onChange={(e) =>
+                      setPrizes((all) => all.map((x, j) => (j === i ? { ...x, description: e.target.value } : x)))
+                    }
+                  />
+                  <input
+                    className="field-input w-24 py-2"
+                    placeholder="Value"
+                    maxLength={40}
+                    value={p.value}
+                    onChange={(e) =>
+                      setPrizes((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
+                    }
+                  />
+                  {prizes.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-tournament"
+                      onClick={() =>
+                        setPrizes((all) => all.filter((_, j) => j !== i).map((x, j) => ({ ...x, place: j + 1 })))
+                      }
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Payout editor — a cash purse only exists when there's an entry fee */}
+        {!free && (
         <div>
           <SectionHeader
             right={
@@ -333,10 +406,11 @@ export function CreateTournamentForm() {
 
           {tooFewPlaces && (
             <p className="mt-1 rounded-sm border border-stale/40 bg-stale/10 p-2 text-xs text-stale">
-              At least two places should be paid (§7). Add another payout row.
+              At least two places should be paid. Add another payout row.
             </p>
           )}
         </div>
+        )}
 
         {error && <p className="text-sm text-tournament">{error}</p>}
 

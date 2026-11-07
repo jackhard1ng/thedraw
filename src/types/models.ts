@@ -250,7 +250,9 @@ export type TournamentStatus =
   | 'draft'
   | 'open'
   | 'filled'
+  | 'closing' // transient: the close is capturing holds + building the draw
   | 'inProgress'
+  | 'completing' // transient: payouts are being sent
   | 'complete'
   | 'cancelled';
 
@@ -299,6 +301,11 @@ export interface Tournament {
   rules?: string | null;
   status: TournamentStatus;
   entryIds: string[];
+  /** Instant games (createInstantEvent): the tee time the creator booked and
+   *  the course, so the whole field sees when and where before they join. */
+  startsAt?: Ts;
+  placeId?: string | null;
+  isInstant?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +384,8 @@ export type MatchStatus =
   | 'awaitingConfirmation'
   | 'complete'
   | 'forfeited'
-  | 'voidedWeather';
+  | 'voidedWeather'
+  | 'voided'; // organizer voided an unplayed single-match event — everyone refunded
 
 export interface Match {
   tournamentId: string;

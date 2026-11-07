@@ -55,6 +55,7 @@ export interface CreateTournamentInput {
   divisionMode: DivisionMode;
   doubleDipRule: DoubleDipRule;
   prizeType: PrizeType;
+  sponsoredPrizes?: { place: number; description: string; value: string }[] | null;
   minEntries: number;
   maxEntries: number;
   registrationOpens: number; // epoch ms (UTC)
@@ -170,14 +171,10 @@ export const finalizeMatchScores = httpsCallable<
   { ok: boolean; margin?: string }
 >(functions, 'finalizeMatchScores');
 
-// ---- Green fees + cancellation ladder (§5 — never player-to-player debt) ---
-export const collectGreenFees = httpsCallable<
-  { matchId: string; perPlayerCents: number },
-  { ok: boolean; charged: number }
->(functions, 'collectGreenFees');
+// ---- Cancellation ladder (§5). Green fees are never handled by the app. ----
 export const cancelScheduledMatch = httpsCallable<
   { matchId: string },
-  { ok: boolean; outcome: 'rescheduled' | 'refundPending' | 'forfeited' }
+  { ok: boolean; outcome: 'rescheduled' | 'rescheduled-late' | 'forfeited' }
 >(functions, 'cancelScheduledMatch');
 
 // ---- Courses: upsert a listed course from a Places pick (only write path) --
@@ -258,6 +255,10 @@ export const resolveDispute = httpsCallable<
   { matchId: string; winnerEntryId: string; margin: string },
   { ok: boolean }
 >(functions, 'resolveDispute');
+export const voidUnplayedMatch = httpsCallable<
+  { matchId: string; note?: string },
+  { ok: boolean }
+>(functions, 'voidUnplayedMatch');
 export const resolveScoreDispute = httpsCallable<
   { scorecardId: string; gross: number },
   { ok: boolean }

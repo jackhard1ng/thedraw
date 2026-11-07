@@ -133,7 +133,7 @@ export function SignIn() {
         <Mark className="mx-auto mb-3 h-12 w-12 text-ink" />
         <h1 className="text-4xl">The Draw</h1>
         <p className="mt-2 text-sm text-ink-soft">
-          Competition and playing partners for golfers without a regular group.
+          Find a game worth playing — competitive golf in Kansas City.
         </p>
       </div>
 

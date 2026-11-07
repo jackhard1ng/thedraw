@@ -115,7 +115,8 @@ export function InstantEventPage() {
         payoutShape: shape,
         ...(name.trim() ? { name: name.trim() } : {}),
       });
-      nav(`/tournaments/${res.data.tournamentId}`);
+      // ?join=1 starts the creator's own entry (and card hold) on arrival.
+      nav(`/tournaments/${res.data.tournamentId}?join=1`);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -127,7 +128,7 @@ export function InstantEventPage() {
       <SectionHeader>Start a game</SectionHeader>
       <p className="mb-5 text-sm text-ink-soft">
         Pick a template, set the details, and it's live — a real game with a
-        published purse and an itemized fee. Challenge one person to a{' '}
+        published purse and an itemized platform fee. Challenge one person to a{' '}
         <span className="text-ink">heads-up match</span>, or spin up a small
         tournament. You can play in it.
       </p>
@@ -267,6 +268,12 @@ export function InstantEventPage() {
                   </>
                 ) : (
                   <>Charged only if the field fills.</>
+                )}
+                {floorShortfall > 0 && (
+                  <>
+                    {' '}A $10 per-event minimum platform fee applies on a field this small
+                    (<Num>{formatCents(floorShortfall)}</Num> more than the percentage), taken from the pot.
+                  </>
                 )}
               </p>
             </Card>

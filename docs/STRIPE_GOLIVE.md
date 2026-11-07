@@ -1,24 +1,30 @@
 # Stripe Go-Live Checklist
 
 How to take The Draw's money rails from test mode to real dollars — safely, and
-without the platform ever holding a withdrawable balance.
+without the platform ever keeping a balance of players' money.
 
 ## The model you're turning on (know this cold)
 
-The Draw is built so that **the platform never holds money**:
+The Draw is built so that **the platform never keeps a balance of players' money**:
 
-- Entry fees are **authorized** (not charged) when a player enters.
-- At close, if the field met its minimum, authorizations are **captured**.
-- If the field came up short, authorizations are **voided** — nobody is charged.
-- Winnings **transfer directly** to each winner's own Stripe Connect (Express)
-  account. Nothing sits in a Draw balance overnight.
+- A stake is **held** (card authorization, manual capture) when a player joins —
+  or the card is saved when the window is longer than 5 days.
+- It is **captured only when the field locks**: at the entry deadline, or the
+  moment an instant game fills (a heads-up match locks when the opponent joins).
+- If the game doesn't fill or is canceled, the hold is **released** — nobody is
+  charged.
+- The winner is paid the pot **minus the platform fee** (itemized before entry;
+  $10 per-event minimum on small fields), by direct **transfer** to their own
+  Stripe Connect (Express) account.
+- Green fees are never touched — players pay the course directly.
+- Free founder-funded launch events take no player payment at all.
 
 This is a deliberate compliance property (no stored value = far less
 money-transmitter exposure). Everything below preserves it. Do not add a step
 that routes winnings through a platform balance.
 
 There is **no Stripe webhook endpoint** in this codebase, and that's fine for
-launch: capture/void/transfer happen inline at close and on the scheduled
+launch: capture/void/transfer happen inline at lock and on the scheduled
 `tick`, not in response to async Stripe events. A webhook (for chargebacks and
 async payout status) is a documented **post-launch** add, not a go-live blocker.
 

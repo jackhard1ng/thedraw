@@ -21,6 +21,7 @@ const { maybeCompleteTournament } = require(path + '/lib/completion.js');
 const { boardSweep } = require(path + '/lib/boardlife.js');
 const { drawSweep } = require(path + '/lib/draw.js');
 const { createScorecards } = require(path + '/lib/lib/matchgen.js');
+const { unplayedMatchSweep, abandonedSeatSweep } = require(path + '/lib/scheduled.js');
 
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
@@ -473,8 +474,13 @@ async function main() {
   const p4card = (await db.doc(`scorecards/${lt}_${le.p4}_1`).get()).data();
   check('finalize sets gross from holes (p4 = 12) and awaits confirmation', p4card.gross === 12 && p4card.status === 'awaitingConfirmation', { g: p4card.gross, s: p4card.status });
   check('group closes after finalize', (await db.doc(`scoreGroups/${lt}_g0`).get()).data().status === 'closed');
-  // Confirm every card with a DIFFERENT-entry partner → event completes.
-  const confirmBy = { p1: 'p2', p2: 'p3', p3: 'p4', p4: 'p1' };
+  // The keeper (p1) posted every card, so the keeper can't vouch for any of
+  // them; each player attests the marker's numbers on their own card, and a
+  // playing partner attests the keeper's own card.
+  let keeperSelfConfirm = false;
+  try { await call(fns.confirmRoundScore, 'p1', { scorecardId: `${lt}_${le.p4}_1` }); } catch { keeperSelfConfirm = true; }
+  check('the scorekeeper cannot confirm a card they posted', keeperSelfConfirm);
+  const confirmBy = { p1: 'p2', p2: 'p2', p3: 'p3', p4: 'p4' };
   for (const owner of ['p1', 'p2', 'p3', 'p4']) {
     await call(fns.confirmRoundScore, confirmBy[owner], { scorecardId: `${lt}_${le[owner]}_1` });
   }
@@ -533,8 +539,11 @@ async function main() {
   const qacard = (await db.doc(`scorecards/${qt}_${qa}_1`).get()).data();
   check('paper totals post gross and await confirmation', qacard.gross === 44 && qacard.status === 'awaitingConfirmation', { g: qacard.gross, s: qacard.status });
   check('group closes after posting totals', (await db.doc(`scoreGroups/${qt}_g0`).get()).data().status === 'closed');
+  let qKeeperConfirm = false;
+  try { await call(fns.confirmRoundScore, 'mkB', { scorecardId: `${qt}_${qa}_1` }); } catch { qKeeperConfirm = true; }
+  check('the keeper who posted totals cannot confirm them', qKeeperConfirm);
   await call(fns.confirmRoundScore, 'mkA', { scorecardId: `${qt}_${qb}_1` });
-  await call(fns.confirmRoundScore, 'mkB', { scorecardId: `${qt}_${qa}_1` });
+  await call(fns.confirmRoundScore, 'mkA', { scorecardId: `${qt}_${qa}_1` }); // own card, posted by the keeper
   check('paper-scored event completes (mkB 40 beats mkA 44)', (await db.doc(`tournaments/${qt}`).get()).data().status === 'complete');
 
   // ================= FLOW R — tee time carries through + lock-when-full + booking
@@ -604,6 +613,124 @@ async function main() {
   let badMyIndex = false;
   try { await call(fns.updateMyIndex, 'ix3', { index: 60 }); } catch { badMyIndex = true; }
   check('an out-of-range index is rejected', badMyIndex);
+
+
+  // ================= FLOW T — audit fixes: money/state safety ===============
+  console.log('\nFLOW T — re-entry, single close, sudden death, void & refund, abandoned seats, forfeit final');
+  const hu = async (creator) =>
+    (await call(fns.createInstantEvent, creator, {
+      templateId: 'headsUpFree', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+    })).tournamentId;
+  const ensureScheduled = async (mid, who) => {
+    const m = (await db.doc(`matches/${mid}`).get()).data();
+    if (m.status === 'scheduling') {
+      const d = Date.now() + 2 * 86400000;
+      for (const u of who) await call(fns.submitAvailability, u, { matchId: mid, dates: [d, d + 86400000, d + 2 * 86400000] });
+      await call(fns.setAgreedTime, who[0], { matchId: mid, agreedTime: d, placeId: null, bookedBy: who[0] });
+    }
+  };
+
+  // Tee times must leave room to fill + lock.
+  let tooSoon = false;
+  try {
+    await call(fns.createInstantEvent, 'p3', { templateId: 'headsUpFree', placeId: null, startsAt: Date.now() + 10 * 60000, entryFeeCents: 0, payoutShape: 'winnerTakeAll' });
+  } catch { tooSoon = true; }
+  check('an instant game needs a tee time at least 30 min out', tooSoon);
+
+  // Re-entry after withdrawing (backing out of a card form must not lock you out).
+  const reT = await hu('p3');
+  const reE1 = (await call(fns.enterTournament, 'p3', { tournamentId: reT })).entryId;
+  await call(fns.withdrawEntry, 'p3', { entryId: reE1 });
+  const reE2 = await call(fns.enterTournament, 'p3', { tournamentId: reT }).then((r) => r.entryId).catch(() => null);
+  check('a player can re-enter after withdrawing', !!reE2 && reE2 !== reE1);
+  let dupBlocked = false;
+  try { await call(fns.enterTournament, 'p3', { tournamentId: reT }); } catch { dupBlocked = true; }
+  check('a live entry still blocks a duplicate', dupBlocked);
+
+  // Two closes at once → one draw, one set of notifications.
+  const ccEvt = await call(fns.createInstantEvent, 'p2', {
+    templateId: 'liveFoursome', placeId: null, startsAt: Date.now() + 5 * 86400000, entryFeeCents: 0, payoutShape: 'winnerTakeAll',
+  });
+  const cc = ccEvt.tournamentId;
+  await call(fns.enterTournament, 'p1', { tournamentId: cc });
+  await call(fns.enterTournament, 'p2', { tournamentId: cc });
+  await Promise.allSettled([
+    call(fns.closeRegistration, 'org1', { tournamentId: cc }),
+    call(fns.closeRegistration, 'org1', { tournamentId: cc }),
+  ]);
+  const ccT = (await db.doc(`tournaments/${cc}`).get()).data();
+  const ccNotes = await db.collection('notifications').where('userId', '==', 'p1').where('link', '==', `/tournaments/${cc}`).get();
+  const lockNotes = ccNotes.docs.filter((d) => /locked in/.test(d.data().title));
+  check('concurrent closes run the draw once', ccT.status === 'inProgress' && lockNotes.length === 1, { s: ccT.status, n: lockNotes.length });
+  // A posted stroke score can't be silently re-submitted.
+  const ccEntry = (await db.collection('entries').where('tournamentId', '==', cc).where('userIds', 'array-contains', 'p1').get()).docs[0].id;
+  await call(fns.submitRoundScore, 'p1', { tournamentId: cc, round: 1, gross: 80 });
+  let resubmit = false;
+  try { await call(fns.submitRoundScore, 'p1', { tournamentId: cc, round: 1, gross: 72 }); } catch { resubmit = true; }
+  const ccCard = (await db.doc(`scorecards/${cc}_${ccEntry}_1`).get()).data();
+  check('a posted score cannot be re-submitted', resubmit && ccCard.gross === 80, { g: ccCard.gross });
+
+  // All square after regulation → sudden death decides it.
+  const sdT = await hu('mkA');
+  const sdA = (await call(fns.enterTournament, 'mkA', { tournamentId: sdT })).entryId;
+  const sdB = (await call(fns.enterTournament, 'mkB', { tournamentId: sdT })).entryId;
+  const sdM = `${sdT}_r1_m0`;
+  await ensureScheduled(sdM, ['mkA', 'mkB']);
+  const sdKeeper = (await db.doc(`matches/${sdM}`).get()).data().scorekeeperUid;
+  for (let h = 1; h <= 9; h++) await call(fns.saveMatchHole, sdKeeper, { matchId: sdM, hole: h, scores: { [sdA]: 4, [sdB]: 4 } });
+  await call(fns.saveMatchHole, sdKeeper, { matchId: sdM, hole: 10, scores: { [sdA]: 4, [sdB]: 5 } });
+  await call(fns.finalizeMatchScores, sdKeeper, { matchId: sdM });
+  const sdAfter = (await db.doc(`matches/${sdM}`).get()).data();
+  check('all square after 9 → first extra hole won decides it', sdAfter.result.winnerEntryId === sdA && sdAfter.result.margin === '1 up (10)', { w: sdAfter.result.winnerEntryId === sdA, m: sdAfter.result.margin });
+
+  // A match nobody reports: nudge at 24h, escalate at 72h, organizer voids.
+  const vT = await hu('p3');
+  await call(fns.enterTournament, 'p3', { tournamentId: vT });
+  await call(fns.enterTournament, 'p4', { tournamentId: vT });
+  const vM = `${vT}_r1_m0`;
+  await ensureScheduled(vM, ['p3', 'p4']);
+  let earlyVoid = false;
+  try { await call(fns.voidUnplayedMatch, 'org1', { matchId: vM }); } catch { earlyVoid = true; }
+  check('a match that is neither disputed nor overdue cannot be voided', earlyVoid);
+  await db.doc(`matches/${vM}`).update({ 'scheduling.agreedTime': Timestamp.fromMillis(Date.now() - 30 * 3600000) });
+  await unplayedMatchSweep(Date.now());
+  const v1 = (await db.doc(`matches/${vM}`).get()).data();
+  check('24h after the tee time with no result → players nudged, not escalated', v1.unplayedNudgeSent === true && !v1.unreported, { n: v1.unplayedNudgeSent, u: v1.unreported });
+  await db.doc(`matches/${vM}`).update({ 'scheduling.agreedTime': Timestamp.fromMillis(Date.now() - 73 * 3600000) });
+  await unplayedMatchSweep(Date.now());
+  check('72h with no result → flagged for the organizer', (await db.doc(`matches/${vM}`).get()).data().unreported === true);
+  let memberVoid = false;
+  try { await call(fns.voidUnplayedMatch, 'p1', { matchId: vM }); } catch { memberVoid = true; }
+  check('only an organizer can void a match', memberVoid);
+  await call(fns.voidUnplayedMatch, 'org1', { matchId: vM });
+  const vAfter = (await db.doc(`matches/${vM}`).get()).data();
+  const vTAfter = (await db.doc(`tournaments/${vT}`).get()).data();
+  check('void → match voided, event cancelled', vAfter.status === 'voided' && vTAfter.status === 'cancelled', { m: vAfter.status, t: vTAfter.status });
+
+  // A seat left at the card form goes back to the field after 30 min.
+  const asT = await hu('p4');
+  await db.doc('entries/abandoned1').set({
+    tournamentId: asT, userIds: ['p1'], displayNames: ['Doyle, K.'], captainId: 'p1', combinedIndex: 7.1,
+    paymentStatus: 'pendingAuthorization', paymentIntentId: null, status: 'active', seed: 0,
+    createdAt: Timestamp.fromMillis(Date.now() - 45 * 60000),
+  });
+  await db.doc(`tournaments/${asT}`).update({ entryIds: admin.firestore.FieldValue.arrayUnion('abandoned1') });
+  await abandonedSeatSweep(Date.now());
+  const asE = (await db.doc('entries/abandoned1').get()).data();
+  const asTd = (await db.doc(`tournaments/${asT}`).get()).data();
+  check('abandoned card-form seat is released', asE.status === 'withdrawn' && !asTd.entryIds.includes('abandoned1'), { s: asE.status, ids: asTd.entryIds });
+
+  // A heads-up forfeited inside 24h completes the event (the final was a forfeit).
+  const ffT = await hu('p1');
+  const ffA = (await call(fns.enterTournament, 'p1', { tournamentId: ffT })).entryId;
+  const ffB = (await call(fns.enterTournament, 'p2', { tournamentId: ffT })).entryId;
+  const ffM = `${ffT}_r1_m0`;
+  await ensureScheduled(ffM, ['p1', 'p2']);
+  await db.doc(`matches/${ffM}`).update({ 'scheduling.agreedTime': Timestamp.fromMillis(Date.now() + 3 * 3600000) });
+  const ffRes = await call(fns.cancelScheduledMatch, 'p2', { matchId: ffM });
+  const ffMatch = (await db.doc(`matches/${ffM}`).get()).data();
+  check('cancel under 24h forfeits to the opponent', ffRes.outcome === 'forfeited' && ffMatch.result.winnerEntryId === ffA, { o: ffRes.outcome, w: ffMatch.result.winnerEntryId === ffA, b: ffB.slice(0, 4) });
+  check('a forfeited final completes the event', (await db.doc(`tournaments/${ffT}`).get()).data().status === 'complete');
 
   // ================= FLOW D — cancellation ladder (§5, deterministic) ========
   console.log('\nFLOW D — cancellation ladder');

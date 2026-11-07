@@ -1,7 +1,8 @@
 /**
  * Organizer verification + rulings panel. Four authoritative actions, each a
- * callable (§5): verify a handicap source, set a Tour Index (never blended with
- * the claimed index — §5), rule a disputed match, and restrict/ban an account.
+ * callable: verify a handicap source, set a Tour Index (never blended with
+ * the claimed index), rule a disputed or unreported match (or void it and
+ * refund both players when it never happened), and restrict/ban an account.
  * Disputed matches are listed by fanning out over the market's tournaments,
  * since `matches` carry no marketId.
  */
@@ -17,6 +18,7 @@ import {
   resolveDispute,
   resolveScoreDispute,
   restrictUser,
+  voidUnplayedMatch,
 } from '@/lib/callable';
 import {
   entryDisplay,
@@ -109,10 +111,12 @@ function DisputeCard({
   matchId,
   tournamentId,
   entryIds,
+  unreported,
 }: {
   matchId: string;
   tournamentId: string;
   entryIds: string[];
+  unreported: boolean;
 }) {
   const entries = useTournamentEntries(tournamentId);
   const two = (entries ?? []).filter((e) => entryIds.includes(e.id));
@@ -125,7 +129,10 @@ function DisputeCard({
 
   return (
     <Card className="p-3">
-      <p className="text-xs text-ink-faint">Match {matchId.slice(0, 8)}</p>
+      <p className="text-xs text-ink-faint">
+        Match {matchId.slice(0, 8)} ·{' '}
+        {unreported ? 'No result 72h after the agreed time' : 'Result disputed'}
+      </p>
       <div className="mt-2 grid grid-cols-2 gap-2">
         {two.map((e) => (
           <button
@@ -163,6 +170,31 @@ function DisputeCard({
       >
         Rule this match
       </Button>
+      <Button
+        variant="ghost"
+        className="mt-2 w-full"
+        disabled={busy}
+        onClick={async () => {
+          if (
+            !window.confirm(
+              'Void this match? Use this only when it was never played. Any captured stakes are refunded in full and the event is cancelled.',
+            )
+          )
+            return;
+          setBusy(true);
+          setErr(null);
+          try {
+            await voidUnplayedMatch({ matchId });
+            setDone('Match voided — stakes refunded.');
+          } catch (e) {
+            setErr((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Void &amp; refund (never played)
+      </Button>
       <ActionResult msg={done} />
       {err && <p className="mt-2 text-sm text-tournament">{err}</p>}
     </Card>
@@ -197,7 +229,7 @@ export function VerifyHandicapPanel() {
 
   // Disputed matches
   const [disputes, setDisputes] = useState<
-    { id: string; tournamentId: string; entryIds: string[] }[] | null
+    { id: string; tournamentId: string; entryIds: string[]; unreported: boolean }[] | null
   >(null);
   const tKey = (tournaments ?? []).map((t) => t.id).sort().join(',');
   useEffect(() => {
@@ -208,15 +240,21 @@ export function VerifyHandicapPanel() {
     }
     let cancelled = false;
     (async () => {
-      const out: { id: string; tournamentId: string; entryIds: string[] }[] = [];
+      const out: { id: string; tournamentId: string; entryIds: string[]; unreported: boolean }[] = [];
       for (let i = 0; i < idList.length; i += 30) {
         const snap = await getDocs(
           query(collection(db, 'matches'), where('tournamentId', 'in', idList.slice(i, i + 30))),
         );
         snap.docs.forEach((d) => {
-          const m = d.data() as Match;
-          if (m.result.disputed && m.status !== 'complete') {
-            out.push({ id: d.id, tournamentId: m.tournamentId, entryIds: [...m.entryIds] });
+          const m = d.data() as Match & { unreported?: boolean };
+          const settled = ['complete', 'forfeited', 'voided'].includes(m.status);
+          if ((m.result?.disputed || m.unreported) && !settled) {
+            out.push({
+              id: d.id,
+              tournamentId: m.tournamentId,
+              entryIds: [...m.entryIds],
+              unreported: !m.result?.disputed && !!m.unreported,
+            });
           }
         });
       }
@@ -279,7 +317,7 @@ export function VerifyHandicapPanel() {
       <div className="mt-8">
         <SectionHeader>Adjust Tour Index</SectionHeader>
         <p className="mb-2 text-xs text-ink-faint">
-          A committee number shown alongside — never blended with — the claimed index (§5).
+          A committee number shown alongside — never blended with — the claimed index.
         </p>
         <div className="space-y-3">
           <Field label="User ID">
@@ -354,7 +392,7 @@ export function VerifyHandicapPanel() {
 
       <div className="mt-8">
         <SectionHeader>
-          Disputed matches{' '}
+          Disputed &amp; unreported matches{' '}
           {disputes && <Num className="text-tournament">{disputes.length}</Num>}
         </SectionHeader>
         {disputes === null ? (
@@ -369,6 +407,7 @@ export function VerifyHandicapPanel() {
                 matchId={d.id}
                 tournamentId={d.tournamentId}
                 entryIds={d.entryIds}
+                unreported={d.unreported}
               />
             ))}
           </div>

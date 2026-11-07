@@ -45,10 +45,10 @@ export function PayoutSetup() {
       <SectionHeader>Set up payouts</SectionHeader>
       <Card className="p-5">
         <p className="text-ink-soft">
-          Winnings pay out directly to <span className="text-ink">your own</span>{' '}
-          account through Stripe. The Draw never holds a balance, never routes your
-          money through a wallet, and never takes a cut of a payout — only the
-          itemized tournament administration fee disclosed at entry (§7).
+          Winnings go straight to <span className="text-ink">your own</span>{' '}
+          payout account through Stripe — we never keep a balance of your money.
+          The only fee is the small platform fee shown before you enter; nothing
+          comes out of a payout after that.
         </p>
 
         {onboarded === undefined ? (

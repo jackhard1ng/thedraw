@@ -79,7 +79,7 @@ export const saveStrokeHole = onCall<{ groupId: string; hole: number; scores: Re
     const cardRef = db.doc(`scorecards/${g.tournamentId}_${entryId}_${g.round}`);
     const card = (await cardRef.get()).data() as { holes: number[] | null; status: string } | undefined;
     if (!card) continue;
-    if (card.status === 'complete' || card.status === 'disputed') continue; // already settled
+    if (card.status !== 'awaitingResult') continue; // posted, disputed, final or DNF — not editable
     const holes =
       Array.isArray(card.holes) && card.holes.length === g.holeCount ? [...card.holes] : new Array(g.holeCount).fill(0);
     holes[hole - 1] = strokes; // 0 = not yet played; real holes are always ≥1
@@ -190,7 +190,8 @@ export const saveMatchHole = onCall<{ matchId: string; hole: number; scores: Rec
   if (m.scorekeeperUid !== uid) throw new HttpsError('permission-denied', 'Only the match scorekeeper can enter scores.');
   if (m.status !== 'scheduled') throw new HttpsError('failed-precondition', 'Scores open once the tee time is set, until the result is in.');
   const hole = req.data.hole;
-  if (!Number.isInteger(hole) || hole < 1 || hole > 18) throw new HttpsError('invalid-argument', 'Invalid hole.');
+  // Up to 9 extra holes for a sudden-death playoff after an all-square round.
+  if (!Number.isInteger(hole) || hole < 1 || hole > 27) throw new HttpsError('invalid-argument', 'Invalid hole.');
   const scores: Record<string, number> = {};
   for (const eid of m.entryIds) {
     const s = req.data.scores?.[eid];
@@ -252,7 +253,7 @@ export const finalizeMatchScores = onCall<{ matchId: string }>(async (req) => {
   const state = netMatchState(holes, m.entryIds, chByEntry, holeHandicapOrder, totalHoles);
   if (!state.winnerEntryId || !state.margin) {
     if (state.allSquareAfterRegulation) {
-      throw new HttpsError('failed-precondition', 'All square after the round — play on, enter the extra hole(s), then finish.');
+      throw new HttpsError('failed-precondition', 'All square after the round — play extra holes (sudden death), enter them, then finish.');
     }
     throw new HttpsError('failed-precondition', 'The match isn’t decided yet — enter more holes.');
   }

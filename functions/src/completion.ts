@@ -2,14 +2,14 @@
  * Tournament completion (spec §4/§5/§7). Computes final standings, writes the
  * append-only awards (placements, not just wins), and pays out from the FROZEN
  * payout table — percentage of the prize fund, integer cents, straight to the
- * winner's own connected account. The platform holds nothing overnight (§P6).
+ * winner's own connected account. The platform never keeps a balance of players' money.
  *
  * Brackets become immutable on completion; the trophy links to the frozen draw.
  */
 import { db, FieldValue, Timestamp, getPrivate, writeLedger } from './shared';
 import { computePayouts, type PayoutRow, type Standings } from './engine/payout';
 import { itemizeEntry } from './engine/money';
-import { payout as stripePayout, stripeEnabled } from './lib/stripe';
+import { payout as stripePayout, refundIntent, stripeEnabled } from './lib/stripe';
 import { rankPod } from './engine/pods';
 import { notify } from './lib/notify';
 
@@ -49,7 +49,10 @@ function seasonLabel(closeMs: number): string {
 export async function maybeCompleteTournament(tournamentId: string) {
   const tRef = db.doc(`tournaments/${tournamentId}`);
   const t = (await tRef.get()).data() as any;
-  if (!t || t.status !== 'inProgress') return;
+  const STALE_MS = 10 * 60_000;
+  const isStale = (x: any) =>
+    x?.status === 'completing' && (x.completingAt?.toMillis?.() ?? 0) < Date.now() - STALE_MS;
+  if (!t || (t.status !== 'inProgress' && !isStale(t))) return;
 
   const format = (await db.doc(`formats/${t.formatId}`).get()).data() as any;
   const entriesSnap = await db.collection('entries').where('tournamentId', '==', tournamentId).get();
@@ -73,6 +76,40 @@ export async function maybeCompleteTournament(tournamentId: string) {
     if (!done) return;
     standings = done.standings;
     awardsToWrite.push(...done.awards);
+  }
+
+  // CLAIM completion before any money moves. The last two confirms, or a
+  // confirm racing the 48h auto-confirm sweep, can both get here; only the one
+  // that flips inProgress → completing pays. A crash mid-payout is re-claimable
+  // after 10 minutes — every transfer and ledger row below is idempotent.
+  const claimed = await db.runTransaction(async (tx) => {
+    const cur = (await tx.get(tRef)).data() as any;
+    if (!cur || (cur.status !== 'inProgress' && !isStale(cur))) return false;
+    tx.update(tRef, { status: 'completing', completingAt: Timestamp.now() });
+    return true;
+  });
+  if (!claimed) return;
+
+  // Nobody posted a score (every card DNF): there's no winner to pay, so the
+  // captured entries go back in full instead of the pot sitting on the platform.
+  const isCashEvent = t.entryFeeCents > 0 && t.prizeType === 'cashPurse';
+  if (isCashEvent && standings.gross.length === 0 && standings.net.length === 0) {
+    for (const e of entries.filter((x) => x.status !== 'withdrawn')) {
+      const ed = (await db.doc(`entries/${e.id}`).get()).data() as { paymentIntentId?: string | null; paymentStatus?: string; captainId: string } | undefined;
+      if (ed?.paymentStatus === 'captured' && ed.paymentIntentId && stripeEnabled()) {
+        try {
+          await refundIntent(ed.paymentIntentId, `refund-${e.id}`);
+        } catch (err) {
+          console.error(`no-finisher refund failed for ${e.id}: ${(err as Error).message}`);
+        }
+      }
+      await db.doc(`entries/${e.id}`).update({ paymentStatus: 'refunded' });
+      for (const u of e.userIds) {
+        await notify({ userId: u, title: `${t.name}: no scores posted`, body: 'Nobody in the field posted a score, so there\'s no result — every entry was refunded in full.', deadlineCritical: true, link: `/tournaments/${tournamentId}` });
+      }
+    }
+    await tRef.update({ status: 'cancelled' });
+    return;
   }
 
   // --- Payout math first, so awards can carry each member's real share ------
@@ -110,7 +147,8 @@ export async function maybeCompleteTournament(tournamentId: string) {
   for (const a of awardsToWrite) {
     const e = entries.find((x) => x.id === a.entryId)!;
     for (const u of e.userIds) {
-      await db.collection('awards').add({
+      // Deterministic id: a retried completion overwrites, never duplicates.
+      await db.doc(`awards/${tournamentId}_${a.entryId}_${u}_${a.placement}`).set({
         userId: u,
         teamId: e.teamId,
         partnerId: e.userIds.find((x) => x !== u) ?? null,
@@ -165,13 +203,13 @@ export async function maybeCompleteTournament(tournamentId: string) {
         let stripeRef = 'pending-onboarding';
         if (stripeEnabled() && orgPriv.stripeConnectId) {
           try {
-            const tr = await stripePayout({ amountCents: orgCut, destinationConnectId: orgPriv.stripeConnectId, tournamentId, toUserId: market.marketOrganizerId });
+            const tr = await stripePayout({ amountCents: orgCut, destinationConnectId: orgPriv.stripeConnectId, tournamentId, toUserId: market.marketOrganizerId, idempotencyKey: `orgshare-${tournamentId}` });
             stripeRef = tr.id;
           } catch (err) {
             console.error(`organizer share failed: ${(err as Error).message}`);
           }
         }
-        await writeLedger({ type: 'adminFee', amountCents: orgCut, fromUserId: null, toUserId: market.marketOrganizerId, tournamentId, matchId: null, stripeRef, note: `market organizer share (${market.organizerSharePercent}% of admin)` });
+        await writeLedger({ type: 'adminFee', amountCents: orgCut, fromUserId: null, toUserId: market.marketOrganizerId, tournamentId, matchId: null, stripeRef, note: `market organizer share (${market.organizerSharePercent}% of admin)` }, `orgshare_${tournamentId}`);
       }
     }
     for (const a of assignments) {
@@ -183,16 +221,17 @@ export async function maybeCompleteTournament(tournamentId: string) {
         const share = memberShare.get(`${a.entryId}:${member}`) ?? 0;
         if (share <= 0) continue;
         const dollars = `$${(share / 100).toFixed(2)}`;
+        const payoutKey = `payout_${tournamentId}_${a.entryId}_${member}_${a.division}${a.place}`;
         const memberPriv = await getPrivate(member);
         let stripeRef = 'pending-onboarding';
         if (stripeEnabled() && memberPriv.stripeConnectId) {
           try {
-            const tr = await stripePayout({ amountCents: share, destinationConnectId: memberPriv.stripeConnectId, tournamentId, toUserId: member });
+            const tr = await stripePayout({ amountCents: share, destinationConnectId: memberPriv.stripeConnectId, tournamentId, toUserId: member, idempotencyKey: payoutKey });
             stripeRef = tr.id;
             await notify({
               userId: member,
               title: `You won ${dollars}`,
-              body: `${t.name}: your prize is on its way to your bank. The Draw holds nothing.`,
+              body: `${t.name}: your prize is on its way to your bank.`,
               deadlineCritical: true,
               link: '/me',
             });
@@ -213,12 +252,12 @@ export async function maybeCompleteTournament(tournamentId: string) {
           await notify({
             userId: member,
             title: `You won ${dollars} — set up payouts`,
-            body: `${t.name}: set up payouts to receive your prize. It pays out automatically once you're set up. The Draw never holds your money.`,
+            body: `${t.name}: set up payouts to receive your prize. It pays out to your own account automatically once you're set up.`,
             deadlineCritical: true,
             link: '/payouts',
           });
         }
-        await writeLedger({ type: 'payout', amountCents: share, fromUserId: null, toUserId: member, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}${members.length > 1 ? ` (team split ${i + 1}/${members.length})` : ''}` });
+        await writeLedger({ type: 'payout', amountCents: share, fromUserId: null, toUserId: member, tournamentId, matchId: null, stripeRef, note: `${a.division} place ${a.place}${members.length > 1 ? ` (team split ${i + 1}/${members.length})` : ''}` }, payoutKey);
       }
     }
   }
@@ -375,7 +414,10 @@ async function completeBracket(tournamentId: string, bracketRounds: number, entr
   const finalId = `${tournamentId}_r${bracketRounds}_m0`;
   const finalSnap = await db.doc(`matches/${finalId}`).get();
   const fin = finalSnap.data() as any;
-  if (!fin || fin.status !== 'complete' || !fin.result?.winnerEntryId) return null;
+  // A forfeit is a finished match too (the opponent advances / is paid) — a
+  // final decided by forfeit must complete the event, or the stake is frozen.
+  const finished = (st: string) => st === 'complete' || st === 'forfeited';
+  if (!fin || !finished(fin.status) || !fin.result?.winnerEntryId) return null;
 
   const matchesSnap = await db.collection('matches').where('tournamentId', '==', tournamentId).get();
   const matches = matchesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
@@ -387,7 +429,7 @@ async function completeBracket(tournamentId: string, bracketRounds: number, entr
   // Losers by round → placement by depth.
   const losersInRound = (round: number) =>
     matches
-      .filter((m) => m.round === round && m.status === 'complete' && m.result?.winnerEntryId)
+      .filter((m) => m.round === round && finished(m.status) && m.result?.winnerEntryId)
       .map((m) => m.entryIds.find((e: string) => e && e !== m.result.winnerEntryId) as string)
       .filter(Boolean)
       .sort((a, b) => bySeed(a) - bySeed(b));

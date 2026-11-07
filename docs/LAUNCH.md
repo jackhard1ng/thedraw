@@ -164,15 +164,19 @@ A network product is a ghost town at zero. Before any flyer:
 
 - [ ] Seed the KC market + a few real courses (see `scripts/seed.mjs`; point it
       at your **live** project, not the emulator).
-- [ ] Create the **first Saturday Classic** with a real date, real course, real
-      $20 entry — a Saturday morning before a college-football kickoff.
+- [ ] Create the **first Saturday Classic** as a **free, founder-funded** event:
+      $0 entry, a real date and course, and a prize you put up yourself (enter
+      it under "What it's played for"). No player payment — nobody has to trust
+      the money rails on day one.
+- [ ] Once a few people have played, run the first **paid heads-up match** with
+      people you know, so the hold → lock → capture → payout loop happens for
+      real.
 - [ ] Personally get **4–8 people you already know** to enter. Your regular
       group, buddies from the range. Text them the share link.
-- [ ] Play it. Score it. Let it close and pay out for real.
+- [ ] Play it. Score it live. Let it settle.
 
-Now you have proof of life, your first real payout screenshot, and people who'll
-vouch. That screenshot is your best marketing asset — nothing sells a money
-game like a real transfer.
+Now you have proof of life and people who'll vouch. Your first real payout
+screenshot (from the paid heads-up match) is your best marketing asset.
 
 ---
 
@@ -218,8 +222,9 @@ drop is measurable.
       per location so you can see what converts).
 - [ ] Drop them at Shoal Creek, Royal Meadows, the range, muni counters — the
       places golfers without a league already stand around.
-- [ ] Lead the flyer with the payout proof and the show-up promise, not the
-      feature list.
+- [ ] Lead the flyer with matchmaking: "Find a game worth playing — someone
+      at your level, this week." The payout proof and the show-up promise come
+      second; never the feature list. Don't imply the app books tee times.
 
 Then watch the board. Real golfers tell you what to build next far better than
 another imagined persona will.

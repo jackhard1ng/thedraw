@@ -99,8 +99,9 @@ export const createInstantEvent = onCall<{
     throw new HttpsError('invalid-argument', 'Payout shape not allowed by this template.');
   }
 
-  if (!startsAt || startsAt < Date.now()) {
-    throw new HttpsError('invalid-argument', 'Pick a future tee time.');
+  // A game needs time to fill and lock before the tee time — at least 30 min.
+  if (!startsAt || startsAt < Date.now() + 30 * 60 * 1000) {
+    throw new HttpsError('invalid-argument', 'Pick a tee time at least 30 minutes out.');
   }
 
   const format = (await db.doc(`formats/${tpl.formatId}`).get()).data() as

@@ -327,7 +327,7 @@ export function PostDetailPage() {
             <Link to="/tournaments/new-game" className="text-tournament underline underline-offset-2">
               Make it an official match
             </Link>{' '}
-            — entries collected up front, winner paid automatically.
+            — each stake is held on the player's card, charged once the match is set, and the winner is paid automatically.
           </p>
         )}
 

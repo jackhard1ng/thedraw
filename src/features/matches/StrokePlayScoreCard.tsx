@@ -57,17 +57,22 @@ export function StrokePlayScoreCard({
     return e?.teamName || (e as { displayNames?: string[] } | undefined)?.displayNames?.join(' / ') || 'A partner';
   };
 
-  // Cards awaiting confirmation from OTHER entries — never my own team's
-  // (the server would reject it; showing the button would just error).
+  // Cards I can vouch for: anyone else's card I didn't post, plus MY OWN card
+  // when my group's scorekeeper (someone off my team) posted it — that's me
+  // attesting the marker's numbers. Mirrors the server's canAttestCard.
+  const myTeam = useMemo(
+    () => (entries ?? []).find((e) => e.id === myEntryId)?.userIds ?? [],
+    [entries, myEntryId],
+  );
   const toConfirm = useMemo(
     () =>
-      (cards ?? []).filter(
-        (c) =>
-          c.status === 'awaitingConfirmation' &&
-          c.entryId !== myEntryId &&
-          c.submittedBy !== uid,
-      ),
-    [cards, uid, myEntryId],
+      (cards ?? []).filter((c) => {
+        if (c.status !== 'awaitingConfirmation' || !uid || c.submittedBy === uid) return false;
+        if (c.entryId !== myEntryId) return true;
+        const by = c.submittedBy as string | null | undefined;
+        return !!by && by !== 'auto' && !myTeam.includes(by);
+      }),
+    [cards, uid, myEntryId, myTeam],
   );
 
   async function submit() {
@@ -167,10 +172,11 @@ export function StrokePlayScoreCard({
       {toConfirm.length > 0 && (
         <div>
           <p className="mb-2 font-display uppercase tracking-wide text-xs text-ink-soft">
-            Confirm a partner's card
+            Confirm a card
           </p>
           <p className="mb-2 text-xs text-ink-faint">
-            You're vouching that you watched this score happen — the §4 marker.
+            You're vouching that the score is right — you watched it happen, or
+            it's your own card as your scorekeeper posted it.
           </p>
           <div className="space-y-2">
             {toConfirm.map((c) => (

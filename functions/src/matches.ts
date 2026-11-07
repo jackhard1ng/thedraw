@@ -204,6 +204,11 @@ export const submitResult = onCall<{
   if (!match) throw new HttpsError('not-found', 'Match not found.');
   const entryId = await actorEntry(match, uid);
   if (!entryId) throw new HttpsError('permission-denied', 'You are not in this match.');
+  // Only before a result exists: a reported result can't be overwritten (that
+  // would restart the 48h clock or re-open a finished match) — dispute instead.
+  if (!['scheduling', 'scheduled', 'awaitingResult'].includes(match.status)) {
+    throw new HttpsError('failed-precondition', 'A result is already in — confirm it or dispute it.');
+  }
   if (!isValidMargin(req.data.margin)) throw new HttpsError('invalid-argument', 'Enter a result margin, e.g. "3&2".');
   if (!loserOf(match.entryIds, req.data.winnerEntryId)) {
     throw new HttpsError('invalid-argument', 'Winner must be one of the two competitors.');
@@ -233,6 +238,12 @@ export const confirmResult = onCall<{ matchId: string }>(async (req) => {
   if (!match) throw new HttpsError('not-found', 'Match not found.');
   const entryId = await actorEntry(match, uid);
   if (!entryId) throw new HttpsError('permission-denied', 'You are not in this match.');
+  if (match.status !== 'awaitingConfirmation') {
+    throw new HttpsError('failed-precondition', 'There is no result waiting for confirmation.');
+  }
+  if (match.result?.disputed) {
+    throw new HttpsError('failed-precondition', 'This result is disputed — an organizer will rule on it.');
+  }
   if (entryId === match.result?.submittedBy) {
     throw new HttpsError('failed-precondition', 'The other side confirms — you submitted it.');
   }
@@ -245,7 +256,14 @@ export const disputeResult = onCall<{ matchId: string; note: string }>(async (re
   const ref = db.doc(`matches/${req.data.matchId}`);
   const match = (await ref.get()).data() as MatchDoc | undefined;
   if (!match) throw new HttpsError('not-found', 'Match not found.');
-  if (!(await actorEntry(match, uid))) throw new HttpsError('permission-denied', 'You are not in this match.');
+  const disputerEntry = await actorEntry(match, uid);
+  if (!disputerEntry) throw new HttpsError('permission-denied', 'You are not in this match.');
+  if (match.status !== 'awaitingConfirmation') {
+    throw new HttpsError('failed-precondition', 'There is no reported result to dispute yet — talk it through in the match chat.');
+  }
+  if (disputerEntry === match.result?.submittedBy) {
+    throw new HttpsError('failed-precondition', 'You reported this result — your opponent confirms or disputes it.');
+  }
   const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string; name: string } | undefined;
   await ref.update({ 'result.disputed': true });
 
@@ -375,7 +393,7 @@ export async function forfeitMatch(
 ) {
   const ref = db.doc(`matches/${matchId}`);
   const match = (await ref.get()).data() as MatchDoc | undefined;
-  if (!match || match.status === 'complete' || match.status === 'forfeited') return;
+  if (!match || ['complete', 'forfeited', 'voided'].includes(match.status)) return;
 
   await ref.update({
     status: 'forfeited',
@@ -399,22 +417,24 @@ export async function forfeitMatch(
       });
     }
   }
+  const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { bracketRounds?: number; structure: string } | undefined;
+  const parsedRound = parseBracket(matchId);
+  const isFinal = !(match.podIndex === undefined && t?.structure === 'bracket' && parsedRound && t.bracketRounds && parsedRound.round < t.bracketRounds);
   {
     const ae = (await db.doc(`entries/${advancingEntryId}`).get()).data() as { userIds: string[] } | undefined;
     for (const u of ae?.userIds ?? []) {
       await notify({
         userId: u,
-        title: 'You advance',
-        body: `Your opponent forfeited (${reason.toLowerCase()}). Watch for your next-round pairing.`,
+        title: isFinal ? 'You win by forfeit' : 'You advance',
+        body: `Your opponent forfeited (${reason.toLowerCase()}). ${isFinal ? 'The result is yours — any winnings follow automatically.' : 'Watch for your next-round pairing.'}`,
         deadlineCritical: true,
         link: `/matches/${matchId}`,
       });
     }
   }
 
-  const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { bracketRounds?: number; structure: string } | undefined;
   if (match.podIndex === undefined && t?.structure === 'bracket') {
-    const parsed = parseBracket(matchId);
+    const parsed = parsedRound;
     if (parsed && t.bracketRounds && parsed.round < t.bracketRounds) {
       await advanceWinner(match.tournamentId, parsed.round, parsed.index, advancingEntryId);
     }
@@ -441,6 +461,11 @@ export const submitRoundScore = onCall<{
   const ref = db.doc(`scorecards/${id}`);
   const cardSnap = await ref.get();
   if (!cardSnap.exists) throw new HttpsError('not-found', 'No scorecard for that round.');
+  // Only an open card: re-submitting a posted, disputed, final or DNF card would
+  // restart the 48h clock and sidestep a dispute entirely.
+  if ((cardSnap.data() as { status: string }).status !== 'awaitingResult') {
+    throw new HttpsError('failed-precondition', 'This card is already posted — confirm or dispute it instead.');
+  }
   if (!Number.isInteger(gross) || gross <= 0) throw new HttpsError('invalid-argument', 'Enter a valid gross score.');
   // Net = gross − the playing handicap FROZEN at draw time. Null handicap
   // (gross format, or a course without tee data) means this card is gross-only.
@@ -456,32 +481,48 @@ export const submitRoundScore = onCall<{
   return { ok: true, status: 'awaitingConfirmation' };
 });
 
-export const confirmRoundScore = onCall<{ scorecardId: string }>(async (req) => {
-  const uid = requireAuth(req.auth);
-  await requireActive(uid);
-  const ref = db.doc(`scorecards/${req.data.scorecardId}`);
-  const sc = (await ref.get()).data() as
-    | { userId: string; status: string; tournamentId: string; entryId: string }
-    | undefined;
-  if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
-  if (sc.status !== 'awaitingConfirmation') {
-    throw new HttpsError('failed-precondition', 'This card is not awaiting confirmation.');
-  }
-  // A playing partner attests — someone IN THE FIELD other than the scorer's
-  // own entry (§4 marker). A random account confirming a stranger's card is
-  // exactly the attack the witness rule exists to stop.
-  const confirmerEntries = await db
+/**
+ * The marker/player rule for stroke cards. Whoever POSTED a card can never
+ * attest it. A card's own player may attest (or dispute) it only when someone
+ * else — the group's scorekeeper — posted it: that's golf's "marker keeps the
+ * card, player signs it." Anyone else in the field may attest as a witness.
+ */
+async function canAttestCard(
+  uid: string,
+  sc: { tournamentId: string; entryId: string; submittedBy?: string | null },
+): Promise<string | null> {
+  const mine = await db
     .collection('entries')
     .where('tournamentId', '==', sc.tournamentId)
     .where('userIds', 'array-contains', uid)
     .limit(1)
     .get();
-  if (confirmerEntries.empty) {
-    throw new HttpsError('permission-denied', 'Only players in this event can confirm a card.');
+  if (mine.empty) return 'Only players in this event can confirm or dispute a card.';
+  if (sc.submittedBy && sc.submittedBy === uid) return 'You posted this card — someone else in the group confirms it.';
+  if (mine.docs[0].id === sc.entryId) {
+    const own = (await db.doc(`entries/${sc.entryId}`).get()).data() as { userIds?: string[] } | undefined;
+    // An auto-posted card (the DNF sweep) has no marker behind it — the
+    // player can't vouch for their own; someone else in the field does.
+    if (!sc.submittedBy || sc.submittedBy === 'auto' || (own?.userIds ?? []).includes(sc.submittedBy)) {
+      return 'You posted your own card — a playing partner confirms it.';
+    }
   }
-  if (confirmerEntries.docs[0].id === sc.entryId) {
-    throw new HttpsError('failed-precondition', 'A playing partner must confirm your card — not your own side.');
+  return null;
+}
+
+export const confirmRoundScore = onCall<{ scorecardId: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  await requireActive(uid);
+  const ref = db.doc(`scorecards/${req.data.scorecardId}`);
+  const sc = (await ref.get()).data() as
+    | { userId: string; status: string; tournamentId: string; entryId: string; submittedBy?: string | null }
+    | undefined;
+  if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
+  if (sc.status !== 'awaitingConfirmation') {
+    throw new HttpsError('failed-precondition', 'This card is not awaiting confirmation.');
   }
+  const why = await canAttestCard(uid, sc);
+  if (why) throw new HttpsError('failed-precondition', why);
   await ref.update({ status: 'complete', confirmedBy: uid, confirmedAt: Timestamp.now() });
   await maybeCompleteTournament(sc.tournamentId);
   return { ok: true };
@@ -500,17 +541,16 @@ export const disputeRoundScore = onCall<{ scorecardId: string; note: string }>(a
   await requireActive(uid);
   const ref = db.doc(`scorecards/${req.data.scorecardId}`);
   const sc = (await ref.get()).data() as
-    | { tournamentId: string; entryId: string; userId: string; gross: number; status: string }
+    | { tournamentId: string; entryId: string; userId: string; gross: number; status: string; submittedBy?: string | null }
     | undefined;
   if (!sc) throw new HttpsError('not-found', 'Scorecard not found.');
   if (sc.status !== 'awaitingConfirmation') {
     throw new HttpsError('failed-precondition', 'Only a submitted card still awaiting confirmation can be disputed.');
   }
-  // The disputer must be a playing partner in the field — never the scorer's
-  // own entry (the same marker rule confirmation uses).
-  const mine = await db.collection('entries').where('tournamentId', '==', sc.tournamentId).where('userIds', 'array-contains', uid).limit(1).get();
-  if (mine.empty) throw new HttpsError('permission-denied', 'Only players in this event can dispute a card.');
-  if (mine.docs[0].id === sc.entryId) throw new HttpsError('failed-precondition', 'You can’t dispute your own side’s card.');
+  // Same marker/player rule as confirming: the poster can't dispute their own
+  // posting; the player CAN dispute a card the scorekeeper posted for them.
+  const why = await canAttestCard(uid, sc);
+  if (why) throw new HttpsError('failed-precondition', why.replace('confirms', 'confirms or disputes'));
 
   const t = (await db.doc(`tournaments/${sc.tournamentId}`).get()).data() as
     | { marketId: string; name: string; entryFeeCents: number }

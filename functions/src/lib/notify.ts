@@ -34,7 +34,9 @@ export async function notify(args: {
   });
 
   if (args.deadlineCritical) {
-    await sendSms(args.userId, `${args.title}\n${args.body}`);
+    // A text is only useful if it opens the thing it's about.
+    const url = args.link ? `${(process.env.APP_URL ?? 'https://thedraw.app').replace(/\/$/, '')}${args.link}` : null;
+    await sendSms(args.userId, `${args.title}\n${args.body}${url ? `\n${url}` : ''}`);
   }
 
   // FCM web push — real device banners for users who enabled notifications.

@@ -4,7 +4,8 @@
  * competition handicap — never their GHIN), resolve disputes, and moderate.
  */
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { db, FieldValue, Timestamp, requireAuth, requireOrganizer, getUser } from './shared';
+import { db, FieldValue, Timestamp, requireAuth, requireOrganizer, getUser, writeLedger } from './shared';
+import { refundIntent, stripeEnabled } from './lib/stripe';
 import { finalizeMatch } from './matches';
 import { maybeCompleteTournament } from './completion';
 import { isValidMargin, loserOf } from './engine/scoring';
@@ -64,22 +65,90 @@ export const adjustTourIndex = onCall<{ userId: string; tourIndex: number; note:
   return { ok: true };
 });
 
-export const resolveDispute = onCall<{ matchId: string; winnerEntryId: string; margin: string }>(async (req) => {
-  const uid = requireAuth(req.auth);
-  const mRef = db.doc(`matches/${req.data.matchId}`);
-  const match = (await mRef.get()).data() as { tournamentId: string; entryIds: [string, string] } | undefined;
-  if (!match) throw new HttpsError('not-found', 'Match not found.');
-  const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string } | undefined;
-  await requireOrganizer(uid, t?.marketId ?? '');
-  // A market organizer may PLAY in events (their revenue share is market-level,
-  // not event-level) — but never referee a match they're competing in.
-  for (const entryId of match.entryIds) {
+/** A match an organizer may rule on: disputed, or overdue with no result. */
+function rulable(m: { status: string; result?: { disputed?: boolean }; unreported?: boolean }): boolean {
+  if (m.status === 'complete' || m.status === 'forfeited' || m.status === 'voided') return false;
+  return !!m.result?.disputed || !!m.unreported;
+}
+
+/** A market organizer may PLAY in events — but never referee their own match. */
+async function assertNotCompetitor(uid: string, entryIds: string[]) {
+  for (const entryId of entryIds) {
     if (!entryId) continue;
     const e = (await db.doc(`entries/${entryId}`).get()).data() as { userIds: string[] } | undefined;
     if (e?.userIds.includes(uid)) {
       throw new HttpsError('permission-denied', 'You are a competitor in this match — a different organizer or admin must rule.');
     }
   }
+}
+
+/**
+ * Void an unplayed / unresolvable single-match event and refund every captured
+ * entry in full — the fair outcome when a money match never happened (both
+ * no-showed, weather, mutual cancel). Brackets can't be voided match-by-match;
+ * rule a winner there instead.
+ */
+export const voidUnplayedMatch = onCall<{ matchId: string; note?: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const mRef = db.doc(`matches/${req.data.matchId}`);
+  const match = (await mRef.get()).data() as
+    | { tournamentId: string; entryIds: [string, string]; status: string; result?: { disputed?: boolean }; unreported?: boolean }
+    | undefined;
+  if (!match) throw new HttpsError('not-found', 'Match not found.');
+  const tRef = db.doc(`tournaments/${match.tournamentId}`);
+  const t = (await tRef.get()).data() as { marketId: string; name: string; entryIds: string[]; entryFeeCents: number } | undefined;
+  if (!t) throw new HttpsError('not-found', 'Event not found.');
+  await requireOrganizer(uid, t.marketId);
+  if (!rulable(match)) throw new HttpsError('failed-precondition', 'Only a disputed or overdue match can be voided.');
+  await assertNotCompetitor(uid, match.entryIds);
+  const entriesSnap = await db.collection('entries').where('tournamentId', '==', match.tournamentId).get();
+  const live = entriesSnap.docs.filter((d) => (d.data() as { status: string }).status !== 'withdrawn');
+  if (live.length !== 2) {
+    throw new HttpsError('failed-precondition', 'Only a single-match event can be voided — rule a winner for a bracket match.');
+  }
+  for (const d of live) {
+    const e = d.data() as { paymentStatus: string; paymentIntentId?: string | null; userIds: string[] };
+    if (e.paymentStatus === 'captured' && e.paymentIntentId && stripeEnabled()) {
+      await refundIntent(e.paymentIntentId, `refund-${d.id}`);
+      await writeLedger(
+        { type: 'refund', amountCents: t.entryFeeCents ?? 0, fromUserId: null, toUserId: e.userIds[0], tournamentId: match.tournamentId, matchId: req.data.matchId, stripeRef: e.paymentIntentId, note: 'match voided by organizer — full refund' },
+        `voidrefund_${d.id}`,
+      );
+    }
+    await d.ref.update({ paymentStatus: t.entryFeeCents > 0 && e.paymentStatus === 'captured' ? 'refunded' : e.paymentStatus });
+    for (const u of e.userIds) {
+      await notify({
+        userId: u,
+        title: t.entryFeeCents > 0 ? 'Match voided — refunded' : 'Match voided',
+        body: `An organizer voided ${t.name}${req.data.note ? ` (${String(req.data.note).slice(0, 140)})` : ''}. ${t.entryFeeCents > 0 ? 'Both stakes were refunded in full.' : 'Nothing goes on either record.'}`,
+        deadlineCritical: true,
+        link: `/matches/${req.data.matchId}`,
+      });
+    }
+  }
+  await mRef.update({ status: 'voided', 'result.disputed': false, unreported: false, voidedBy: uid });
+  await tRef.update({ status: 'cancelled' });
+  const reports = await db.collection('reports').where('targetType', '==', 'match').where('targetId', '==', req.data.matchId).where('status', '==', 'open').get();
+  await Promise.all(reports.docs.map((r) => r.ref.update({ status: 'resolved' })));
+  return { ok: true };
+});
+
+export const resolveDispute = onCall<{ matchId: string; winnerEntryId: string; margin: string }>(async (req) => {
+  const uid = requireAuth(req.auth);
+  const mRef = db.doc(`matches/${req.data.matchId}`);
+  const match = (await mRef.get()).data() as
+    | { tournamentId: string; entryIds: [string, string]; status: string; result?: { disputed?: boolean }; unreported?: boolean }
+    | undefined;
+  if (!match) throw new HttpsError('not-found', 'Match not found.');
+  const t = (await db.doc(`tournaments/${match.tournamentId}`).get()).data() as { marketId: string } | undefined;
+  await requireOrganizer(uid, t?.marketId ?? '');
+  // Only a match that actually needs a ruling: a disputed result, or one that
+  // went unreported past its tee time. Never a finished match — rewriting a
+  // winner after payout would move nothing and corrupt the record.
+  if (!rulable(match)) {
+    throw new HttpsError('failed-precondition', 'This match doesn’t need a ruling (it isn’t disputed or overdue).');
+  }
+  await assertNotCompetitor(uid, match.entryIds);
   if (!isValidMargin(req.data.margin) || !loserOf(match.entryIds, req.data.winnerEntryId)) {
     throw new HttpsError('invalid-argument', 'Provide a valid winner and margin.');
   }

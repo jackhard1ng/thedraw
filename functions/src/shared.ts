@@ -150,11 +150,15 @@ export async function writeLedger(row: {
   matchId: string | null;
   stripeRef: string;
   note: string;
-}) {
+}, id?: string) {
   if (!Number.isInteger(row.amountCents)) {
     throw new HttpsError('internal', 'Ledger amounts must be integer cents.');
   }
-  await db.collection('ledger').add({ ...row, timestamp: FieldValue.serverTimestamp() });
+  // A deterministic id makes a retried step overwrite its own row instead of
+  // double-booking it (completion payouts pass one).
+  const doc = { ...row, timestamp: FieldValue.serverTimestamp() };
+  if (id) await db.doc(`ledger/${id}`).set(doc);
+  else await db.collection('ledger').add(doc);
 }
 
 /** Record a reputation event (~1yr expiry; old flakes shouldn't follow forever). */

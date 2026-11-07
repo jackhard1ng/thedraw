@@ -61,6 +61,8 @@ export function Onboarding() {
         // Only the 18+ FACT is public (the gate needs a boolean); the exact age
         // goes to the owner-only private subdoc, not readable by other members.
         isAdult: ageNum >= 18,
+        // Drives tee suggestions on the pre-match card (forward tees), nothing else.
+        gender,
         handicap: {
           index: indexNum,
           // A client may only ever self-declare; a green/yellow badge is granted

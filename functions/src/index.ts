@@ -61,6 +61,7 @@ export {
   adjustTourIndex,
   resolveDispute,
   resolveScoreDispute,
+  voidUnplayedMatch,
   restrictUser,
   reviewEventRequest,
 } from './organizer';
@@ -73,7 +74,7 @@ export { createInstantEvent } from './instant';
 
 export { createTourSeries, createTourStop } from './tour';
 
-export { collectGreenFees, cancelScheduledMatch } from './greenfees';
+export { cancelScheduledMatch } from './greenfees';
 
 export { ensureCourse, updateCourseData } from './courses';
 

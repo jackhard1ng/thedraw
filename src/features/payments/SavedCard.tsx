@@ -34,13 +34,12 @@ export function SavedCard() {
       <Card className="p-5">
         <p className="text-ink-soft">
           Save a card once for one-tap re-entry into future events. Your card lives
-          with Stripe, not with The Draw — we never store card numbers or hold a
-          balance (§7).
+          with Stripe, not with The Draw — we never see or store card numbers.
         </p>
 
         {saved ? (
           <div className="mt-4 rounded-sm border border-pine/40 bg-pine/10 p-3 text-sm text-pine">
-            Card saved. Future entries can charge it with one tap.
+            Card saved. Future entries can place a hold on it with one tap.
           </div>
         ) : clientSecret ? (
           <div className="mt-5">

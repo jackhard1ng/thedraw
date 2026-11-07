@@ -4,17 +4,20 @@
  * that decide an entry: what it is, what it costs, and how long you have to get
  * in. Everything numeric is tabular.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { collection, documentId, getDocs, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { Badge, Card, Num, Spinner } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui';
 import { formatCents } from '@/lib/money';
-import { relativeDays } from '@/lib/format';
-import type { TournamentStatus } from '@/types/models';
+import { formatTeeTime, relativeDays } from '@/lib/format';
+import type { Tournament, TournamentStatus } from '@/types/models';
 import {
   useFormats,
   useTournaments,
+  useUserEntries,
   type TournamentWithId,
 } from './useTournaments';
 
@@ -22,7 +25,7 @@ type Tab = 'open' | 'live' | 'past';
 
 const TAB_STATUSES: Record<Tab, TournamentStatus[]> = {
   open: ['open', 'filled'],
-  live: ['inProgress'],
+  live: ['closing', 'inProgress', 'completing'],
   past: ['complete'],
 };
 
@@ -30,7 +33,9 @@ const STATUS_LABEL: Record<TournamentStatus, string> = {
   draft: 'Draft',
   open: 'Open',
   filled: 'Filled',
+  closing: 'Locking',
   inProgress: 'Live',
+  completing: 'Settling',
   complete: 'Complete',
   cancelled: 'Cancelled',
 };
@@ -75,6 +80,7 @@ function TournamentCard({
           <span>
             <Num>{field}</Num>/<Num>{t.maxEntries}</Num> entered
           </span>
+          {t.startsAt && <span>Tees off {formatTeeTime(t.startsAt)}</span>}
         </div>
 
         <div className="mt-3 flex items-center justify-between border-t border-rule pt-2 text-xs text-ink-faint">
@@ -85,7 +91,7 @@ function TournamentCard({
           </span>
           {t.status === 'open' && (
             <span className="font-display uppercase tracking-wide text-tournament">
-              Enter →
+              View →
             </span>
           )}
         </div>
@@ -94,8 +100,55 @@ function TournamentCard({
   );
 }
 
+/** The games you're in that aren't settled yet — the first thing you look for. */
+function YourGames({ uid, formatName }: { uid: string; formatName: (id: string) => string }) {
+  const entries = useUserEntries(uid);
+  const ids = useMemo(
+    () =>
+      [...new Set((entries ?? []).filter((e) => e.status !== 'withdrawn').map((e) => e.tournamentId))]
+        .sort()
+        .join(','),
+    [entries],
+  );
+  const [rows, setRows] = useState<TournamentWithId[]>([]);
+  useEffect(() => {
+    const list = ids ? ids.split(',') : [];
+    if (list.length === 0) {
+      setRows([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const out: TournamentWithId[] = [];
+      for (let i = 0; i < list.length; i += 30) {
+        const snap = await getDocs(
+          query(collection(db, 'tournaments'), where(documentId(), 'in', list.slice(i, i + 30))),
+        );
+        snap.docs.forEach((d) => out.push({ id: d.id, ...(d.data() as Tournament) }));
+      }
+      if (!cancelled) setRows(out.filter((t) => !['complete', 'cancelled'].includes(t.status)));
+    })().catch(() => {
+      if (!cancelled) setRows([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ids]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-6">
+      <p className="mb-2 font-display uppercase tracking-wide text-xs text-ink-soft">Your games</p>
+      <div className="space-y-3">
+        {rows.map((t) => (
+          <TournamentCard key={t.id} t={t} formatName={formatName(t.formatId)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function TournamentListPage() {
-  const { profile } = useAuth();
+  const { profile, fbUser } = useAuth();
   const marketId = profile?.marketId ?? 'kc';
   const [tab, setTab] = useState<Tab>('open');
   const tournaments = useTournaments(marketId, TAB_STATUSES[tab]);
@@ -128,6 +181,8 @@ export function TournamentListPage() {
           </Link>
         </div>
       </div>
+
+      {fbUser && <YourGames uid={fbUser.uid} formatName={(id) => formats[id]?.name ?? id} />}
 
       <div className="mb-4 flex gap-2">
         {(['open', 'live', 'past'] as Tab[]).map((tb) => (

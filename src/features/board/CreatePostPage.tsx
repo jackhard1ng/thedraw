@@ -306,8 +306,8 @@ export function CreatePostPage() {
                   <Link to="/tournaments/new-game" className="text-tournament underline underline-offset-2">
                     official match
                   </Link>{' '}
-                  instead and both entries are collected before you tee off — the
-                  winner is paid automatically, nobody has to ask.
+                  instead: both stakes are held on card, charged once the match is
+                  set, and the winner is paid automatically — nobody has to ask.
                 </p>
               </div>
             )}

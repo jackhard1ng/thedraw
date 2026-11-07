@@ -2,10 +2,9 @@
  * Stripe Connect (Express) integration (spec §3/§7).
  *
  * The single most important compliance property: THE PLATFORM NEVER HOLDS A
- * WITHDRAWABLE BALANCE. Entry fees are authorized at registration and captured
- * at close; if the field is short, authorizations are voided. Winnings transfer
- * directly to the winner's own connected account on completion. Nothing is held
- * overnight (§P6, §7.1).
+ * WITHDRAWABLE BALANCE. Stakes are authorized (held) at join and captured only
+ * when the field locks; if it doesn't fill, holds are voided. Winnings transfer
+ * directly to the winner's own connected account on completion.
  *
  * Stripe is loaded lazily and degrades gracefully: without STRIPE_SECRET_KEY the
  * money rails are inert (free events still run end to end, paid events report a
@@ -98,16 +97,20 @@ export async function chargeSavedMethod(args: {
   entryId: string;
 }) {
   const stripe = getStripe();
-  return stripe.paymentIntents.create({
-    amount: args.amountCents,
-    currency: 'usd',
-    customer: args.customerId,
-    payment_method: args.paymentMethodId,
-    payment_method_types: ['card'],
-    confirm: true,
-    off_session: true,
-    metadata: { tournamentId: args.tournamentId, entryId: args.entryId },
-  });
+  // Idempotent per entry: a retried close returns the SAME charge, never a second.
+  return stripe.paymentIntents.create(
+    {
+      amount: args.amountCents,
+      currency: 'usd',
+      customer: args.customerId,
+      payment_method: args.paymentMethodId,
+      payment_method_types: ['card'],
+      confirm: true,
+      off_session: true,
+      metadata: { tournamentId: args.tournamentId, entryId: args.entryId },
+    },
+    { idempotencyKey: `charge-${args.entryId}` },
+  );
 }
 
 export async function retrievePaymentIntent(id: string) {
@@ -124,32 +127,44 @@ export async function accountPayoutsEnabled(connectId: string): Promise<boolean>
   return acct.payouts_enabled === true;
 }
 
-export async function captureIntent(paymentIntentId: string) {
-  return getStripe().paymentIntents.capture(paymentIntentId);
+export async function captureIntent(paymentIntentId: string, idempotencyKey?: string) {
+  return getStripe().paymentIntents.capture(
+    paymentIntentId,
+    {},
+    idempotencyKey ? { idempotencyKey } : undefined,
+  );
 }
 
 export async function voidIntent(paymentIntentId: string) {
   return getStripe().paymentIntents.cancel(paymentIntentId);
 }
 
-export async function refundIntent(paymentIntentId: string) {
-  return getStripe().refunds.create({ payment_intent: paymentIntentId });
+export async function refundIntent(paymentIntentId: string, idempotencyKey?: string) {
+  return getStripe().refunds.create(
+    { payment_intent: paymentIntentId },
+    idempotencyKey ? { idempotencyKey } : undefined,
+  );
 }
 
-/** Transfer winnings to a connected account — the platform holds nothing. */
+/** Transfer winnings straight to the winner's own connected account. */
 export async function payout(args: {
   amountCents: number;
   destinationConnectId: string;
   tournamentId: string;
   toUserId: string;
+  /** Unique per (event, recipient, purpose) — a retried completion can't pay twice. */
+  idempotencyKey?: string;
 }) {
   const stripe = getStripe();
-  return stripe.transfers.create({
-    amount: args.amountCents,
-    currency: 'usd',
-    destination: args.destinationConnectId,
-    metadata: { tournamentId: args.tournamentId, toUserId: args.toUserId },
-  });
+  return stripe.transfers.create(
+    {
+      amount: args.amountCents,
+      currency: 'usd',
+      destination: args.destinationConnectId,
+      metadata: { tournamentId: args.tournamentId, toUserId: args.toUserId },
+    },
+    args.idempotencyKey ? { idempotencyKey: args.idempotencyKey } : undefined,
+  );
 }
 
 /** Express onboarding link so a winner can receive payouts to their own account. */

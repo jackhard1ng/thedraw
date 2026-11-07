@@ -1,8 +1,10 @@
 # The Draw
 
-Competition and playing partners for golfers without a regular group —
-tournaments, match play, and open tee times. Kansas City first, nationally
-expandable.
+Matchmaking for competitive golfers in Kansas City — heads-up money matches,
+2-man scrambles and small events. Players book their own public tee times; the
+app finds the opponent, holds the stakes (captured only when the field locks),
+runs live scoring and pays the winner. Free to join; green fees always stay
+with the course.
 
 This repository implements the full build specification (`the-draw-build-spec`)
 across Phases 1–4: the board, free and paid tournaments, and the depth layer.
@@ -88,8 +90,9 @@ adding a format never touches the engine.
 
 - **Order of merit** built; `matches.holes` / `scorecards.holes` arrays are
   modeled from day one so live scoring (RTDB) is a feature, not a migration.
-- Live hole-by-hole scoring, held tee inventory, and negotiated league rates
-  remain deferred per §6/§9.
+- Live hole-by-hole scoring is built (one scorekeeper per group). The app
+  never holds tee inventory or negotiates course rates — players book their
+  own tee times.
 
 ### App Store (decided: web first, native later)
 

@@ -59,10 +59,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!fbUser) return;
     setProfileReady(false);
     const ref = doc(db, 'users', fbUser.uid);
-    return onSnapshot(ref, (snap) => {
-      setProfile(snap.exists() ? (snap.data() as User) : null);
-      setProfileReady(true);
-    });
+    return onSnapshot(
+      ref,
+      (snap) => {
+        setProfile(snap.exists() ? (snap.data() as User) : null);
+        setProfileReady(true);
+      },
+      (err) => {
+        // Never hang on a spinner: surface the app (onboarding) and log it.
+        console.error('profile listener failed', err);
+        setProfileReady(true);
+      },
+    );
   }, [fbUser]);
 
   const value = useMemo<AuthState>(

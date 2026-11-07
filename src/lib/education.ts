@@ -47,6 +47,8 @@ export function preMatchCard(args: {
   teeSets?: { name: string; rating: number }[] | null;
   /** True for a format that is EXPLICITLY scratch (handicapAllowance type 'none'). */
   scratch?: boolean;
+  /** 9 or 18 — strokes scale with the round (half the difference over 9). */
+  holes?: number;
 }): PreMatchCard {
   const {
     entriesRemaining,
@@ -59,13 +61,18 @@ export function preMatchCard(args: {
     teeSets,
     scratch,
   } = args;
+  const roundHoles = args.holes === 9 ? 9 : 18;
 
   const youGets = youIndex >= oppIndex;
   const high = Math.max(youIndex, oppIndex);
   const low = Math.min(youIndex, oppIndex);
+  // Same rule the live card and the server use: the full difference over 18,
+  // half of it over 9, on the hardest holes being PLAYED.
   const { strokes, holes, perHoleBase } = scratch
     ? { strokes: 0, holes: [] as number[], perHoleBase: 0 }
-    : matchStrokeHoles(high, low, holeHandicapOrder);
+    : roundHoles === 9
+      ? nineHoleStrokes(high, low, holeHandicapOrder)
+      : matchStrokeHoles(high, low, holeHandicapOrder);
 
   const strokesLine =
     scratch
@@ -131,6 +138,26 @@ export function preMatchCard(args: {
   };
 }
 
+/** Strokes over a 9-hole match: half the index difference, on the hardest of holes 1–9. */
+function nineHoleStrokes(
+  higherIndex: number,
+  lowerIndex: number,
+  holeHandicapOrder: number[] | null,
+): { strokes: number; holes: number[]; perHoleBase: number } {
+  const strokes = Math.max(0, Math.round((higherIndex - lowerIndex) / 2));
+  const perHoleBase = Math.floor(strokes / 9);
+  const remainder = strokes % 9;
+  if (!holeHandicapOrder || holeHandicapOrder.length < 9) return { strokes, holes: [], perHoleBase };
+  const holes = holeHandicapOrder
+    .slice(0, 9)
+    .map((si, i) => ({ hole: i + 1, si }))
+    .sort((a, b) => a.si - b.si)
+    .slice(0, remainder)
+    .map((h) => h.hole)
+    .sort((a, b) => a - b);
+  return { strokes, holes, perHoleBase };
+}
+
 /**
  * The stroke rule, stated in plain language for the registration page (§5 —
  * format explained BEFORE payment). One sentence, no jargon left undefined.
@@ -146,7 +173,7 @@ export function strokesRule(format: {
     return 'Scratch — no strokes for anyone, by design. Straight up.';
   }
   if (format.scoring === 'matchPlay') {
-    return 'Strokes: the difference between your two indexes, taken on the hardest holes on the card. Equal indexes = scratch match, no strokes.';
+    return 'Strokes: the difference between your two indexes (half of it over 9 holes), taken on the hardest holes on the card. Equal indexes = scratch match, no strokes.';
   }
   if (!a) {
     return 'No strokes — everyone plays straight up. Your gross score is your score.';

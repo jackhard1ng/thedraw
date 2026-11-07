@@ -218,8 +218,8 @@ export function TourPage() {
         <h1 className="text-2xl">The Tour</h1>
       </div>
       <p className="mb-5 text-sm text-ink-soft">
-        A stop every week, a different course every time. Results feed the season
-        order of merit.
+        A stop every week at the courses the organizer picks. Players book their
+        own tee times; results feed the season order of merit.
       </p>
 
       {series.length === 0 && (
@@ -275,7 +275,7 @@ export function TourPage() {
                           {formatTeeTime(st.startsAt)}
                         </p>
                         <p className="text-xs text-ink-faint">
-                          <Num>{st.teeTimesHeld}</Num> tee times held
+                          Book your own tee time
                           {t && (
                             <>
                               {' '}· <Num>{t.entryIds.length}</Num>/<Num>{t.maxEntries}</Num> in

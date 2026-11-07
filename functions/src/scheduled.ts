@@ -10,7 +10,7 @@
  * Weather is the #1 expected support request; it is automated before launch.
  */
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { db, getPrivate, Timestamp } from './shared';
+import { db, FieldValue, getPrivate, Timestamp } from './shared';
 import { resolveAtDeadline, type AvailabilityEntry } from './engine/scheduling';
 import { runClose } from './tournaments';
 import { finalizeMatch, forfeitMatch } from './matches';
@@ -19,7 +19,7 @@ import { boardSweep } from './boardlife';
 import { drawSweep } from './draw';
 import { tourSweep } from './tour';
 import { notify } from './lib/notify';
-import { accountPayoutsEnabled, payout as stripePayout, stripeEnabled } from './lib/stripe';
+import { accountPayoutsEnabled, payout as stripePayout, stripeEnabled, voidIntent } from './lib/stripe';
 
 export const tick = onSchedule('every 60 minutes', async () => {
   const now = Date.now();
@@ -35,7 +35,124 @@ export const tick = onSchedule('every 60 minutes', async () => {
   await drawSweep(now);
   await tourSweep(now);
   await settlePendingPayouts();
+  await retryStuckCompletions(now);
+  await unplayedMatchSweep(now);
+  await abandonedSeatSweep(now);
 });
+
+/**
+ * A player who opened the card form and walked away holds a seat — in a
+ * heads-up match, the ONLY other seat. After 30 minutes the seat goes back to
+ * the field (the hold, if any, is voided — nothing was ever charged).
+ */
+export async function abandonedSeatSweep(now: number) {
+  const snap = await db.collection('entries').where('paymentStatus', '==', 'pendingAuthorization').get();
+  for (const d of snap.docs) {
+    const e = d.data() as {
+      tournamentId: string;
+      status: string;
+      captainId: string;
+      userIds?: string[];
+      paymentIntentId?: string | null;
+      createdAt?: Timestamp;
+    };
+    if (e.status !== 'active') continue;
+    if ((e.createdAt?.toMillis() ?? now) > now - 30 * 60_000) continue;
+    const tRef = db.doc(`tournaments/${e.tournamentId}`);
+    const t = (await tRef.get()).data() as { status: string; name: string } | undefined;
+    if (!t || t.status !== 'open') continue; // close handles it from here
+    if (e.paymentIntentId && stripeEnabled()) {
+      try {
+        await voidIntent(e.paymentIntentId);
+      } catch (err) {
+        console.error(`abandoned-seat void failed for ${d.id}: ${(err as Error).message}`);
+      }
+    }
+    await tRef.update({ entryIds: FieldValue.arrayRemove(d.id) });
+    await d.ref.update({ status: 'withdrawn', withdrawnReason: 'cardNotCompleted' });
+    await notify({
+      userId: e.captainId,
+      title: 'Your spot was released',
+      body: `You didn't finish adding a card for ${t.name}, so the seat went back to the field. Nothing was charged — you can rejoin if there's room.`,
+      link: `/tournaments/${e.tournamentId}`,
+    });
+  }
+}
+
+/** A completion that crashed mid-payout is re-run once stale (payouts are idempotent). */
+async function retryStuckCompletions(now: number) {
+  const stuck = await db
+    .collection('tournaments')
+    .where('status', '==', 'completing')
+    .where('completingAt', '<=', Timestamp.fromMillis(now - 10 * 60_000))
+    .get();
+  for (const d of stuck.docs) {
+    try {
+      await maybeCompleteTournament(d.id);
+    } catch (e) {
+      console.error(`completion retry failed for ${d.id}: ${(e as Error).message}`);
+    }
+  }
+}
+
+/**
+ * A scheduled match whose tee time came and went with NO result reported (both
+ * no-showed, or the winner never posted) must not freeze captured money. Day 1
+ * after the tee time: nudge both sides. Day 3: hand it to the market organizer,
+ * who rules a winner or voids + refunds (single-match events).
+ */
+export async function unplayedMatchSweep(now: number) {
+  const due = await db
+    .collection('matches')
+    .where('status', '==', 'scheduled')
+    .where('scheduling.agreedTime', '<=', Timestamp.fromMillis(now - 24 * 3_600_000))
+    .get();
+  for (const d of due.docs) {
+    const m = d.data() as any;
+    const teeMs = (m.scheduling.agreedTime as Timestamp).toMillis();
+    const captains: string[] = [];
+    for (const eid of (m.entryIds as string[]).filter(Boolean)) {
+      const e = (await db.doc(`entries/${eid}`).get()).data() as { captainId: string } | undefined;
+      if (e) captains.push(e.captainId);
+    }
+    if (!m.unplayedNudgeSent) {
+      for (const u of captains) {
+        await notify({
+          userId: u,
+          title: 'Did your match happen?',
+          body: 'The tee time has passed with no result. Finish the live card or report the result so it settles. If it didn’t happen, say so in the match chat — after 3 days an organizer steps in.',
+          deadlineCritical: true,
+          link: `/matches/${d.id}`,
+        });
+      }
+      await d.ref.update({ unplayedNudgeSent: true });
+      continue;
+    }
+    if (!m.unreported && teeMs <= now - 72 * 3_600_000) {
+      const t = (await db.doc(`tournaments/${m.tournamentId}`).get()).data() as { marketId: string; name: string } | undefined;
+      await d.ref.update({ unreported: true }); // surfaces it in the organizer's ruling queue
+      await db.collection('reports').add({
+        reportedBy: 'system',
+        targetType: 'match',
+        targetId: d.id,
+        marketId: t?.marketId ?? '',
+        reason: `Unreported match: the tee time passed 3 days ago with no result (${t?.name ?? 'event'}). Rule a winner, or void and refund if it never happened.`,
+        context: null,
+        createdAt: Timestamp.now(),
+        status: 'open',
+      });
+      for (const u of captains) {
+        await notify({
+          userId: u,
+          title: 'Your match went to an organizer',
+          body: 'No result was reported, so an organizer will rule on it — tell them what happened in the match chat.',
+          deadlineCritical: true,
+          link: `/matches/${d.id}`,
+        });
+      }
+    }
+  }
+}
 
 /**
  * Money owed but not yet deliverable — a winner who hadn't finished Connect
@@ -62,6 +179,7 @@ async function settlePendingPayouts() {
         destinationConnectId: priv.stripeConnectId,
         tournamentId: row.tournamentId ?? '',
         toUserId: row.toUserId,
+        idempotencyKey: `settle-${d.id}`, // one transfer per ledger row, ever
       });
       // Settlement update, not a mutation of history: the row records the same
       // debt — stripeRef flips from the pending marker to the real transfer.
@@ -118,7 +236,10 @@ async function bookingWindowSweep(now: number) {
 
 async function closeDueTournaments(now: number) {
   const due = await db.collection('tournaments').where('status', '==', 'open').where('registrationCloses', '<=', Timestamp.fromMillis(now)).get();
-  for (const d of due.docs) {
+  // A close that crashed mid-way sits in 'closing'; runClose re-claims it once
+  // it's 10 minutes stale (captures/charges are idempotent, so this is safe).
+  const stuck = await db.collection('tournaments').where('status', '==', 'closing').where('closingAt', '<=', Timestamp.fromMillis(now - 10 * 60_000)).get();
+  for (const d of [...due.docs, ...stuck.docs]) {
     try {
       await runClose(d.id);
     } catch (e) {
@@ -253,7 +374,28 @@ export async function dnfSweep(now: number) {
     .get();
   const touched = new Set<string>();
   for (const d of due.docs) {
-    const sc = d.data() as { tournamentId: string; userId: string; round: number };
+    const sc = d.data() as { tournamentId: string; userId: string; round: number; holes?: number[] | null; courseHandicap?: number | null };
+    // A live card with holes on it was PLAYED — the scorekeeper just never
+    // tapped Finish. Post it for confirmation instead of throwing it away.
+    const played = (Array.isArray(sc.holes) ? sc.holes : []).filter((x) => x > 0);
+    if (played.length > 0) {
+      const gross = played.reduce((a, b) => a + b, 0);
+      await d.ref.update({
+        gross,
+        net: sc.courseHandicap != null ? gross - sc.courseHandicap : null,
+        submittedBy: 'auto', // not a player: the card's own player may attest it
+        confirmDeadline: Timestamp.fromMillis(now + 48 * 3_600_000),
+        status: 'awaitingConfirmation',
+      });
+      await notify({
+        userId: sc.userId,
+        title: `Round ${sc.round}: your live card was posted`,
+        body: `Nobody tapped Finish, so the holes entered (${played.length}, gross ${gross}) were posted for you. Confirm or dispute within 48h, or it auto-confirms.`,
+        deadlineCritical: true,
+        link: `/tournaments/${sc.tournamentId}/scorecard`,
+      });
+      continue;
+    }
     await d.ref.update({ status: 'dnf' });
     touched.add(sc.tournamentId);
     await notify({
@@ -289,17 +431,13 @@ async function weatherSweep(now: number) {
       const rainMm = w.rain?.['1h'] ?? 0;
       const dangerous = conditions.includes('thunderstorm') || rainMm > 7.6;
       if (dangerous) {
-        // App-collected green fees refund on a weather void — "void + refund"
-        // must mean refund. Course-side fees follow the course's own policy.
-        const { refundGreenFees } = await import('./greenfees');
-        await refundGreenFees(d.id, m);
+        // Green fees are the course's business (its own rain policy) — never ours.
         // One update, straight back to scheduling with a fresh window and a
         // CLEAR availability log — stale dates must not re-lock the rained-out
         // day at the next deadline pass.
         await d.ref.update({
           status: 'scheduling',
           weatherVoided: true,
-          greenFees: null,
           'scheduling.agreedTime': null,
           'scheduling.availabilityLog': [],
           'scheduling.deadline': Timestamp.fromMillis(now + 2 * 86_400_000),
@@ -308,7 +446,7 @@ async function weatherSweep(now: number) {
         for (const id of entryIds) {
           const e = (await db.doc(`entries/${id}`).get()).data() as any;
           for (const u of e?.userIds ?? []) {
-            await notify({ userId: u, title: 'Match voided — weather', body: 'Dangerous weather at your course. The tee time is voided (green fees collected through The Draw are refunded) and the match is back to scheduling — post fresh dates.', deadlineCritical: true, link: `/matches/${d.id}` });
+            await notify({ userId: u, title: 'Match voided — weather', body: 'Dangerous weather at your course. The tee time is voided and the match is back to scheduling — post fresh dates. If you booked it, check the course’s rain policy.', deadlineCritical: true, link: `/matches/${d.id}` });
           }
         }
       }

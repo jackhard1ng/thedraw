@@ -74,9 +74,11 @@ export function TermsPage() {
   return (
     <LegalLayout title="Terms of Service">
       <p>
-        The Draw is a platform for finding and running golf competitions — leagues,
-        tournaments, one-off matches, and scrambles — in the Kansas City area. By
-        creating an account you agree to these terms. If you don’t, don’t use it.
+        The Draw is a matchmaking platform for competitive golf in the Kansas City
+        area — heads-up matches, scrambles, small events and leagues. Players book
+        their own public tee times; The Draw never reserves tee times or holds
+        course inventory. By creating an account you agree to these terms. If you
+        don’t, don’t use it.
       </p>
 
       <div className="space-y-2">
@@ -101,19 +103,21 @@ export function TermsPage() {
       <div className="space-y-2">
         <H>Money</H>
         <p>
-          When you enter a paid event your card is <em>authorized</em>, not charged.
-          If the event fills its minimum, authorizations are captured at close and
-          the purse is paid out. If the field falls short of the minimum, your
-          authorization is voided and you are never charged. Winnings transfer
-          directly to your own connected payout account — The Draw never holds a
-          withdrawable balance of your money. See the{' '}
+          Joining is free. When you join a game with a stake, your card is{' '}
+          <em>held</em>, not charged. The stake is captured only when the field
+          locks; if the game doesn’t fill or is canceled, the hold is released and
+          you are never charged. The winner receives the pot minus a small platform
+          fee, shown itemized before you join (on very small fields a $10 per-event
+          minimum fee applies). Winnings transfer directly to your own connected
+          payout account — The Draw never keeps a balance of your money. Free
+          launch events have no player payment at all. See the{' '}
           <Link to="/refunds" className="underline">Refund &amp; Cancellation Policy</Link>{' '}
           for withdrawals and no-shows.
         </p>
         <p>
-          <strong>Green fees are separate.</strong> You pay the course directly for
-          your round. Entry fees cover the competition purse and a stated admin fee
-          only.
+          <strong>Green fees always stay with the course.</strong> You pay the
+          course directly for your round; The Draw never handles green fees. Stakes
+          cover the pot and the stated platform fee only.
         </p>
       </div>
 
@@ -247,29 +251,31 @@ export function RefundsPage() {
       </p>
 
       <div className="space-y-2">
-        <H>Before an event fills</H>
+        <H>Before the field locks</H>
         <p>
-          Entering authorizes your card; it does not charge it. If the event never
-          reaches its minimum field, the authorization is voided and you pay
-          nothing.
+          Joining places a hold on your card; it does not charge it. If the game
+          doesn’t fill or is canceled, the hold is released and you pay nothing.
         </p>
       </div>
 
       <div className="space-y-2">
-        <H>Withdrawing before entries lock</H>
+        <H>Withdrawing before the field locks</H>
         <p>
-          You can withdraw any time before the entry deadline. Your authorization is
-          released and you are not charged.
+          You can withdraw any time until the field locks — at the entry deadline,
+          or the moment a game fills (a heads-up match locks as soon as your
+          opponent joins). Your hold is released and you are not charged.
         </p>
       </div>
 
       <div className="space-y-2">
         <H>Withdrawing after lock, or not showing up</H>
         <p>
-          Once entries lock, the field and purse are set around you. If you withdraw
-          after the deadline or don’t show, your entry fee may be captured and kept
-          in the purse for the players who did show, and a reliability event is
-          recorded on your profile. If something genuinely went wrong — injury,
+          Once the field locks, your stake is captured and the pot is set around
+          you. If you pull out after that or don’t show, your stake stays in the
+          pot — in a heads-up match the match is forfeited to your opponent — and
+          a reliability mark is recorded on your profile. A match neither player
+          could play can be voided by an organizer, and both stakes are refunded
+          in full. If something genuinely went wrong — injury,
           emergency, a course closure — email us and we’ll look at it.
         </p>
       </div>
@@ -277,8 +283,8 @@ export function RefundsPage() {
       <div className="space-y-2">
         <H>Green fees</H>
         <p>
-          Green fees are paid directly to the course and are never collected or
-          refunded by The Draw. A refund of an entry fee does not include any money
+          Green fees always stay with the course: you pay the course directly, and
+          The Draw never collects, splits or refunds them. A refund of an entry fee does not include any money
           you paid a course.
         </p>
       </div>
@@ -321,8 +327,9 @@ export function SupportPage() {
         <H>Money problems come first</H>
         <p>
           If it’s about a charge or a payout, say “PAYMENT” in the subject and we’ll
-          prioritize it. The Draw never holds your money overnight — a payout goes
-          straight to your own account — so most issues are quick to trace.
+          prioritize it. Stakes are held on your card until the field locks and
+          winnings go straight to your own payout account — we never keep a
+          balance of your money — so most issues are quick to trace.
         </p>
       </div>
 
